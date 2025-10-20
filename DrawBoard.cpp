@@ -2,6 +2,11 @@
 #include "AppConfig.h"
 #include "ResourceManager.h"
 #include <fstream>
+#include <array>
+
+const wxColour DrawBoard::HANDLE_FILL_RGB(255, 255, 255);
+const wxColour DrawBoard::HANDLE_STROKE_RGB(0, 0, 0);
+
 
 DrawBoard::DrawBoard(wxWindow* parent) : wxPanel(parent)
 {
@@ -62,14 +67,20 @@ void DrawBoard::OnPaint(wxPaintEvent& event)
 
         // 高亮选中的元件
         if (selectedGateIndex >= 0 && selectedGateIndex < (int)gates.size()) {
-            wxPoint gPos = gates[selectedGateIndex].pos;
-            wxBitmap& bmp = gates[selectedGateIndex].bmp;
-            wxRect rect(gPos.x, gPos.y, bmp.GetWidth(), bmp.GetHeight());
+            const auto& g = gates[selectedGateIndex];
 
-            gc->SetPen(wxPen(wxColour(0, 200, 0), 2));   // 绿色框
-            gc->SetBrush(*wxTRANSPARENT_BRUSH);
-            gc->DrawRectangle(rect.GetX(), rect.GetY(), rect.GetWidth(), rect.GetHeight());
+            // 关键：这里的尺寸必须与实际绘制一致（若你对位图做了按百分比缩放，取缩放后的尺寸）
+            wxSize bmpSize = g.bmp.GetSize();
+
+            auto anchors = GetGateAnchorPoints(g.pos, bmpSize);
+            DrawSelectionHandles(gc, anchors);
+
+            // （可选）如果仍想保留非常淡的外框提示，可启用这三行：
+            // gc->SetPen(wxPen(wxColour(0,150,0), 1, wxPENSTYLE_SHORT_DASH));
+            // gc->SetBrush(*wxTRANSPARENT_BRUSH);
+            // gc->StrokeRectangle(g.pos.x, g.pos.y, bmpSize.GetWidth(), bmpSize.GetHeight());
         }
+
         else {
             selectedGateIndex = -1;
         }
@@ -262,3 +273,48 @@ void DrawBoard::LoadFromJson(const std::string& filename)
 
     Refresh();
 }
+
+// 计算四角锚点：左上、右上、左下、右下
+std::array<wxPoint, 4> DrawBoard::GetGateAnchorPoints(const wxPoint& topLeft, const wxSize& bmpSize) const
+{
+    int x0 = topLeft.x;
+    int y0 = topLeft.y;
+    int x1 = topLeft.x + bmpSize.GetWidth();
+    int y1 = topLeft.y + bmpSize.GetHeight();
+
+    // 外扩/内缩，正=往外，负=往内
+    x0 -= HANDLE_OFFSET_PX;
+    y0 -= HANDLE_OFFSET_PX;
+    x1 += HANDLE_OFFSET_PX;
+    y1 += HANDLE_OFFSET_PX;
+
+    return { wxPoint{x0,y0}, wxPoint{x1,y0}, wxPoint{x0,y1}, wxPoint{x1,y1} };
+}
+
+void DrawBoard::DrawSelectionHandles(wxGraphicsContext* gc, const std::array<wxPoint, 4>& anchors)
+{
+    if (!gc) return;
+
+    gc->SetPen(wxPen(HANDLE_STROKE_RGB, HANDLE_STROKE_PX));
+    gc->SetBrush(wxBrush(HANDLE_FILL_RGB));
+
+    const double r = HANDLE_RADIUS_PX;
+    for (const auto& p : anchors) {
+        const double cx = static_cast<double>(p.x);
+        const double cy = static_cast<double>(p.y);
+        gc->DrawEllipse(cx - r, cy - r, 2 * r, 2 * r);
+    }
+}
+
+std::vector<wxPoint> DrawBoard::GetSelectedGateAnchors() const
+{
+    if (selectedGateIndex >= 0 && selectedGateIndex < (int)gates.size()) {
+        const auto& g = gates[selectedGateIndex];
+        wxSize bmpSize = g.bmp.GetSize();
+        auto arr = GetGateAnchorPoints(g.pos, bmpSize);
+        return std::vector<wxPoint>(arr.begin(), arr.end());
+    }
+    return {};
+}
+
+
