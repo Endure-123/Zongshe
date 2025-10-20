@@ -24,6 +24,15 @@ public:
     int currentTool = ID_TOOL_ARROW; // 当前工具
     int selectedGateIndex = -1;      // -1 表示没有选中
 
+    // ====== 拖动所需状态 ======
+    int     m_draggingIndex = -1;   // 正在拖动的元件下标（-1 表示无）
+    bool    m_isDragging = false;
+    wxPoint m_dragStartMouse;       // 鼠标按下时的位置
+    wxPoint m_dragStartGatePos;     // 元件按下时的位置
+
+    // 命中测试：给定一点，返回命中的元件下标（从上到下优先最上层）
+    int HitTestGate(const wxPoint& pt) const;
+
     wxPoint currentStart, currentEnd, mousePos;
     bool isDrawingLine, isInsertingText, isDrawing;
 

@@ -19,6 +19,9 @@ DrawBoard::DrawBoard(wxWindow* parent) : wxPanel(parent)
     st1 = new wxStaticText(this, -1, wxT(""), wxPoint(10, 10));
     st2 = new wxStaticText(this, -1, wxT(""), wxPoint(10, 30));
 
+    m_isDragging = false;
+    m_draggingIndex = -1;
+
     isDrawingLine = false;
     isInsertingText = false;
     isDrawing = false;
@@ -69,7 +72,7 @@ void DrawBoard::OnPaint(wxPaintEvent& event)
         if (selectedGateIndex >= 0 && selectedGateIndex < (int)gates.size()) {
             const auto& g = gates[selectedGateIndex];
 
-            // 关键：这里的尺寸必须与实际绘制一致（若你对位图做了按百分比缩放，取缩放后的尺寸）
+            // 关键：这里的尺寸必须与实际绘制一致
             wxSize bmpSize = g.bmp.GetSize();
 
             auto anchors = GetGateAnchorPoints(g.pos, bmpSize);
@@ -113,6 +116,15 @@ void DrawBoard::OnButtonMove(wxMouseEvent& event)
     st2->SetLabel(wxString::Format("y: %d", event.GetY()));
 
     if (isDrawing) currentEnd = mousePos;
+
+    // ===== 新增：拖动中，更新元件位置 =====
+    if (m_isDragging && m_draggingIndex >= 0 && m_draggingIndex < static_cast<int>(gates.size())) {
+        const wxPoint delta = mousePos - m_dragStartMouse;
+        gates[m_draggingIndex].pos = m_dragStartGatePos + delta;
+        // 用合并刷新减少闪烁
+        Refresh(false);
+        return; // 已经刷新，不再走下面的通用 Refresh()
+    }
     Refresh();
 }
 
@@ -131,10 +143,32 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
         return;
     }
 
-    // Arrow 工具：选择元器件
+    // Arrow 工具：选择 + 准备拖动（修改点：不再直接 return）
     if (currentTool == ID_TOOL_ARROW) {
-        SelectGate(pos);
-        return;
+        // 命中测试
+        int hit = HitTestGate(pos);
+        if (hit >= 0) {
+            // 选中
+            selectedGateIndex = hit;         // 你已有的选中逻辑
+            Refresh();                       // 立即显示四点定位
+
+            // 进入拖动状态
+            m_draggingIndex = hit;
+            m_isDragging = true;
+            m_dragStartMouse = pos;
+            m_dragStartGatePos = gates[hit].pos;
+
+            // 捕获鼠标，防止拖出面板丢事件
+            if (!HasCapture()) CaptureMouse();
+        }
+        else {
+            // 点空白：取消选中
+            selectedGateIndex = -1;
+            m_draggingIndex = -1;
+            m_isDragging = false;
+            Refresh();
+        }
+        // 注意：这里不要 return，让后续 Text/Hand 分支继续判断也可以，但它们通常互斥
     }
 
     // Hand 工具：画线
@@ -159,6 +193,15 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
 
 void DrawBoard::OnLeftUp(wxMouseEvent& event)
 {
+    // ===== 新增：若在拖动，则结束拖动 =====
+    if (m_isDragging) {
+        m_isDragging = false;
+        m_draggingIndex = -1;
+        if (HasCapture()) ReleaseMouse();
+        Refresh(); // 固定在当前位置并重绘
+        // 不 return，继续执行下面的画线结束逻辑也没问题（两者通常互斥）
+    }
+    
     if (isDrawingLine && isDrawing) {
         currentEnd = event.GetPosition();
         lines.emplace_back(std::make_pair(currentStart, currentEnd));
@@ -200,6 +243,20 @@ void DrawBoard::DeleteSelectedGate()
         Refresh();
     }
 }
+
+int DrawBoard::HitTestGate(const wxPoint& pt) const
+{
+    // 从后往前（假设后画的在最上层）
+    for (int i = static_cast<int>(gates.size()) - 1; i >= 0; --i) {
+        const auto& g = gates[i];
+        const wxSize sz = g.bmp.GetSize();   // 已是实际绘制尺寸
+        if (wxRect(g.pos, sz).Contains(pt)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 
 // ---------------- JSON 保存/加载 ----------------
 void DrawBoard::SaveToJson(const std::string& filename)
