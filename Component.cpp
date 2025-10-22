@@ -178,18 +178,18 @@ void NANDGate::drawSelf(wxMemoryDC& memDC) {
     path.AddLineToPoint(m_center.x + 20 * scale, m_center.y + 20 * scale);
     path.AddArc(m_center.x + 20 * scale, m_center.y, 20 * scale, M_PI / 2, -M_PI / 2, false);
 
-    // 输入两根
+    // 输入
     path.MoveToPoint(m_center.x - 40 * scale, m_center.y + 10 * scale);
     path.AddLineToPoint(m_center.x - 20 * scale, m_center.y + 10 * scale);
     path.MoveToPoint(m_center.x - 40 * scale, m_center.y - 10 * scale);
     path.AddLineToPoint(m_center.x - 20 * scale, m_center.y - 10 * scale);
 
-    // 输出气泡
-    path.AddCircle(m_center.x + 45 * scale, m_center.y, 5 * scale);
+    // 反相气泡：略右移 & 略小，避免与 AND 半圆描边重合
+    path.AddCircle(m_center.x + 47 * scale, m_center.y, 4 * scale);
 
-    // 输出线
-    path.MoveToPoint(m_center.x + 50 * scale, m_center.y);
-    path.AddLineToPoint(m_center.x + 65 * scale, m_center.y);
+    // 输出线：从气泡右端再右一点起笔
+    path.MoveToPoint(m_center.x + 51 * scale, m_center.y);
+    path.AddLineToPoint(m_center.x + 66 * scale, m_center.y);
 
     gc->StrokePath(path);
 
@@ -199,7 +199,6 @@ void NANDGate::drawSelf(wxMemoryDC& memDC) {
             gc->DrawEllipse(m_BoundaryPoints[j].x - 4, m_BoundaryPoints[j].y - 4, 8, 8);
         }
     }
-
     delete gc;
 }
 
@@ -212,13 +211,13 @@ bool NANDGate::Isinside(const wxPoint& point) const {
 }
 
 void NANDGate::UpdateGeometry() {
-    // 比 AND 稍宽（因为气泡 + 输出）
     m_BoundaryPoints[0] = wxPoint(m_center.x - 40 * scale, m_center.y - 22 * scale);
     m_BoundaryPoints[1] = wxPoint(m_center.x - 40 * scale, m_center.y + 22 * scale);
-    m_BoundaryPoints[2] = wxPoint(m_center.x + 65 * scale, m_center.y - 22 * scale);
-    m_BoundaryPoints[3] = wxPoint(m_center.x + 65 * scale, m_center.y + 22 * scale);
-    pout = wxPoint(m_center.x + 65 * scale, m_center.y);
+    m_BoundaryPoints[2] = wxPoint(m_center.x + 66 * scale, m_center.y - 22 * scale); // 65 -> 66
+    m_BoundaryPoints[3] = wxPoint(m_center.x + 66 * scale, m_center.y + 22 * scale); // 65 -> 66
+    pout = wxPoint(m_center.x + 66 * scale, m_center.y);
 }
+
 
 // ============ NOR ============
 void NORGate::drawSelf(wxMemoryDC& memDC) {

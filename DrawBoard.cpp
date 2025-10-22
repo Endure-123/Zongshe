@@ -308,15 +308,21 @@ std::array<wxPoint, 4> DrawBoard::GetGateAnchorPoints(const Component* comp) con
 
 ComponentType DrawBoard::NameToType(const wxString& s)
 {
-    wxString u = s.Upper();
-    if (u.Contains("AND"))  return ANDGATE;
-    if (u.Contains("OR") && !u.Contains("XOR") && !u.Contains("NOR")) return ORGATE;
-    if (u.Contains("NOT"))  return NOTGATE;
+    wxString u = s.Upper().Trim(true).Trim(false);
+
+    // 先匹配更具体的（避免 "NAND" 被 "AND" 抢先匹配）
     if (u.Contains("NAND")) return NANDGATE;
     if (u.Contains("NOR"))  return NORGATE;
     if (u.Contains("XOR"))  return XORGATE;
-    return ANDGATE; // 默认
+
+    // 再匹配基本门
+    if (u.Contains("NOT"))  return NOTGATE;
+    if (u.Contains("OR"))   return ORGATE;
+    if (u.Contains("AND"))  return ANDGATE;
+
+    return ANDGATE; // 兜底
 }
+
 
 const char* DrawBoard::TypeToName(ComponentType t)
 {
