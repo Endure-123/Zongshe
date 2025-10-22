@@ -335,3 +335,52 @@ void XORGate::UpdateGeometry() {
     m_BoundaryPoints[3] = wxPoint(m_center.x + 60 * scale, m_center.y + 22 * scale);
     pout = wxPoint(m_center.x + 60 * scale, m_center.y);
 }
+
+// Component.cpp 末尾新增：返回每个门的可连接引脚（输入 + 输出），顺序随意
+std::vector<wxPoint> ANDGate::GetPins() const {
+    return {
+        wxPoint(m_center.x - 40 * scale, m_center.y - 10 * scale), // IN1
+        wxPoint(m_center.x - 40 * scale, m_center.y + 10 * scale), // IN2
+        wxPoint(m_center.x + 60 * scale, m_center.y)               // OUT
+    };
+}
+
+std::vector<wxPoint> ORGate::GetPins() const {
+    return {
+        wxPoint(m_center.x - 40 * scale, m_center.y - 10 * scale),
+        wxPoint(m_center.x - 40 * scale, m_center.y + 10 * scale),
+        wxPoint(m_center.x + 60 * scale, m_center.y)
+    };
+}
+
+std::vector<wxPoint> NOTGate::GetPins() const {
+    return {
+        wxPoint(m_center.x - 50 * scale, m_center.y),              // IN
+        wxPoint(m_center.x + 60 * scale, m_center.y)               // OUT
+    };
+}
+
+std::vector<wxPoint> NANDGate::GetPins() const {
+    return {
+        wxPoint(m_center.x - 40 * scale, m_center.y - 10 * scale),
+        wxPoint(m_center.x - 40 * scale, m_center.y + 10 * scale),
+        wxPoint(m_center.x + 66 * scale, m_center.y)               // OUT（注意 66）
+    };
+}
+
+std::vector<wxPoint> NORGate::GetPins() const {
+    return {
+        wxPoint(m_center.x - 40 * scale, m_center.y - 10 * scale),
+        wxPoint(m_center.x - 40 * scale, m_center.y + 10 * scale),
+        wxPoint(m_center.x + 65 * scale, m_center.y)               // OUT（注意 65）
+    };
+}
+
+std::vector<wxPoint> XORGate::GetPins() const {
+    return {
+        wxPoint(m_center.x - 40 * scale, m_center.y - 10 * scale),
+        wxPoint(m_center.x - 40 * scale, m_center.y + 10 * scale),
+        wxPoint(m_center.x + 60 * scale, m_center.y)
+    };
+}
+

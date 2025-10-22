@@ -27,6 +27,12 @@ public:
     // 线/文本/鼠标
     wxPoint currentStart, currentEnd, mousePos;
     bool isDrawingLine, isInsertingText, isDrawing;
+    // 替换旧的直线容器：每根线是一条折线（点序列）
+    std::vector<std::vector<wxPoint>> wires;
+
+    // 画线状态
+    wxPoint lineStart;                               // ★ 新增：起点（已吸附/对齐后）
+    bool    isRouting = false;                       // ★ 新增：是否正在画线
 
     // 直线与文本仍保持你的原结构
     std::vector<std::pair<wxPoint, wxPoint>> lines;
@@ -78,4 +84,17 @@ private:
     static const wxColour HANDLE_STROKE_RGB;
     static constexpr int  HANDLE_RADIUS_PX = 5;
     static constexpr int  HANDLE_STROKE_PX = 1;
+
+    // ★ 新增：找到最近引脚（返回是否命中），out 为吸附后的坐标
+    bool FindNearestPin(const wxPoint& p, wxPoint& out, int* compIdx = nullptr) const;
+
+    // ★ 新增：生成 L 形曼哈顿路径（start→end），优先水平再垂直（或反之均可）
+    std::vector<wxPoint> MakeManhattan(const wxPoint& a, const wxPoint& b) const;
+
+    // ★ 新增：可选：吸附到网格（若你想要）
+    wxPoint SnapToGrid(const wxPoint& p) const;
+
+    // 参数
+    static constexpr int GRID = 20;
+    static constexpr int SNAP_PIN_RADIUS = 12;   // 鼠标在这个半径内就吸附到引脚
 };

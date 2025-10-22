@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <wx/wx.h>
+#include <vector> 
 
 // 新增更完整的门类型
 enum ComponentType {
@@ -34,6 +35,7 @@ public:
     virtual void UpdateGeometry() = 0;
     virtual void drawSelf(wxMemoryDC& memDC) = 0;
     virtual bool Isinside(const wxPoint& point) const = 0;
+    virtual std::vector<wxPoint> GetPins() const { return {}; }
 
 protected:
     bool m_isSelected;
@@ -60,6 +62,7 @@ public:
     void drawSelf(wxMemoryDC& memDC) override;
     bool Isinside(const wxPoint& point) const override;
     void UpdateGeometry() override;
+    std::vector<wxPoint> GetPins() const override;
 };
 
 // ---------- OR ----------
@@ -72,6 +75,7 @@ public:
     void drawSelf(wxMemoryDC& memDC) override;
     bool Isinside(const wxPoint& point) const override;
     void UpdateGeometry() override;
+    std::vector<wxPoint> GetPins() const override;
 };
 
 // ---------- NOT ----------
@@ -84,6 +88,7 @@ public:
     void drawSelf(wxMemoryDC& memDC) override;
     bool Isinside(const wxPoint& point) const override;
     void UpdateGeometry() override;
+    std::vector<wxPoint> GetPins() const override;
 };
 
 // ---------- NAND（= AND + 气泡） ----------
@@ -96,6 +101,7 @@ public:
     void drawSelf(wxMemoryDC& memDC) override;
     bool Isinside(const wxPoint& point) const override;
     void UpdateGeometry() override;
+    std::vector<wxPoint> GetPins() const override;
 };
 
 // ---------- NOR（= OR + 气泡） ----------
@@ -108,6 +114,7 @@ public:
     void drawSelf(wxMemoryDC& memDC) override;
     bool Isinside(const wxPoint& point) const override;
     void UpdateGeometry() override;
+    std::vector<wxPoint> GetPins() const override;
 };
 
 // ---------- XOR（= OR 的前缘双曲线） ----------
@@ -120,4 +127,5 @@ public:
     void drawSelf(wxMemoryDC& memDC) override;
     bool Isinside(const wxPoint& point) const override;
     void UpdateGeometry() override;
+    std::vector<wxPoint> GetPins() const override;
 };

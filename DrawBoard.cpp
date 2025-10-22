@@ -43,16 +43,32 @@ void DrawBoard::OnPaint(wxPaintEvent& event)
         // 背景网格
         drawGrid(gc);
 
-        // 已保存的线
+        // ====== A) 已保存的线（从 lines → wires 的折线绘制）======
         gc->SetPen(wxPen(wxColour(0, 0, 0), 2));
-        for (const auto& line : lines) {
-            gc->StrokeLine(line.first.x, line.first.y, line.second.x, line.second.y);
+        for (const auto& poly : wires) {                 // ★ 用 wires
+            for (size_t i = 1; i < poly.size(); ++i) {
+                gc->StrokeLine(poly[i - 1].x, poly[i - 1].y,
+                    poly[i].x, poly[i].y);
+            }
         }
 
-        // 临时预览线
-        if (isDrawing) {
+        // ====== B) 临时预览线（曼哈顿折线 + 吸附）======
+        if (isRouting) {                                 // ★ 用 isRouting
+            wxPoint hover = mousePos;
+            wxPoint snapEnd;
+            if (FindNearestPin(mousePos, snapEnd, nullptr)) {
+                hover = snapEnd;                        // 终点吸附到最近引脚
+            }
+            else {
+                hover = SnapToGrid(mousePos);           // 可选：吸到网格
+            }
+
+            auto preview = MakeManhattan(lineStart, hover); // 生成 L 形折线
             gc->SetPen(wxPen(wxColour(0, 0, 255), 2, wxPENSTYLE_DOT));
-            gc->StrokeLine(currentStart.x, currentStart.y, mousePos.x, mousePos.y);
+            for (size_t i = 1; i < preview.size(); ++i) {
+                gc->StrokeLine(preview[i - 1].x, preview[i - 1].y,
+                    preview[i].x, preview[i].y);
+            }
         }
 
         // 文本
@@ -77,6 +93,7 @@ void DrawBoard::OnPaint(wxPaintEvent& event)
 
     dc.Blit(0, 0, GetClientSize().GetWidth(), GetClientSize().GetHeight(), &memDC, 0, 0);
 }
+
 
 void DrawBoard::drawGrid(wxGraphicsContext* gc)
 {
@@ -137,11 +154,23 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
     }
 
     // 画线
-    if (currentTool == ID_TOOL_HAND && isDrawingLine) {
-        currentStart = pos;
-        currentEnd = currentStart;
-        isDrawing = true;
+    if (currentTool == ID_TOOL_HAND) {
+        // 开始画线
+        wxPoint pos = event.GetPosition();
+
+        // 1) 优先吸附到引脚
+        wxPoint snap;
+        if (FindNearestPin(pos, snap, nullptr)) {
+            lineStart = snap;
+        }
+        else {
+            // 2) 吸附网格（可选）
+            lineStart = SnapToGrid(pos);
+        }
+        isRouting = true;
+        return;
     }
+
 
     // 文本
     if (currentTool == ID_TOOL_TEXT && isInsertingText) {
@@ -170,6 +199,24 @@ void DrawBoard::OnLeftUp(wxMouseEvent& event)
         lines.emplace_back(std::make_pair(currentStart, currentEnd));
         isDrawing = false;
         Refresh();
+    }
+
+    if (isRouting) {
+        wxPoint pos = event.GetPosition();
+        wxPoint endPt;
+        if (!FindNearestPin(pos, endPt, nullptr)) {
+            endPt = SnapToGrid(pos); // 可选
+        }
+
+        auto poly = MakeManhattan(lineStart, endPt);
+
+        // 避免“起点=终点”或重复点导致 0 长度线段
+        if (poly.size() >= 2 && !(poly.front() == poly.back())) {
+            wires.push_back(std::move(poly));
+        }
+        isRouting = false;
+        Refresh();
+        return;
     }
 }
 
@@ -349,3 +396,57 @@ std::unique_ptr<Component> DrawBoard::MakeComponent(ComponentType t, const wxPoi
     default:       return nullptr;
     }
 }
+
+bool DrawBoard::FindNearestPin(const wxPoint& p, wxPoint& out, int* compIdx) const
+{
+    int bestIdx = -1;
+    wxPoint bestPt;
+    int bestD2 = SNAP_PIN_RADIUS * SNAP_PIN_RADIUS + 1;
+
+    for (int i = 0; i < (int)components.size(); ++i) {
+        auto pins = components[i]->GetPins();
+        for (auto& pin : pins) {
+            int dx = pin.x - p.x;
+            int dy = pin.y - p.y;
+            int d2 = dx * dx + dy * dy;
+            if (d2 <= SNAP_PIN_RADIUS * SNAP_PIN_RADIUS && d2 < bestD2) {
+                bestD2 = d2;
+                bestPt = pin;
+                bestIdx = i;
+            }
+        }
+    }
+    if (bestIdx >= 0) {
+        out = bestPt;
+        if (compIdx) *compIdx = bestIdx;
+        return true;
+    }
+    return false;
+}
+
+std::vector<wxPoint> DrawBoard::MakeManhattan(const wxPoint& a, const wxPoint& b) const
+{
+    // 共线：水平或垂直，直接一段
+    if (a.x == b.x || a.y == b.y) {
+        return { a, b };
+    }
+
+    // 方案 A：先水平后垂直（a.x → b.x, a.y → b.y）
+    // 拐点1 = (b.x, a.y)
+    wxPoint bend(b.x, a.y);
+    return { a, bend, b };
+
+    // 若想优先垂直后水平，就改成：
+    // wxPoint bend(a.x, b.y);
+    // return { a, bend, b };
+}
+
+wxPoint DrawBoard::SnapToGrid(const wxPoint& p) const
+{
+    auto roundTo = [](int v, int g) {
+        int r = (v + g / 2) / g;
+        return r * g;
+        };
+    return wxPoint(roundTo(p.x, GRID), roundTo(p.y, GRID));
+}
+
