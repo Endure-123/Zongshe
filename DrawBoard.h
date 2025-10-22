@@ -51,6 +51,8 @@ public:
     void AddGate(const wxPoint& center, const wxString& typeName);
     void SelectGate(const wxPoint& pos);
     void DeleteSelectedGate();
+    void DeleteSelectedWire();               
+    void DeleteSelection();                  // 优先删除元件，否则删除线
     void ClearTexts();
     void ClearPics();
 
@@ -100,9 +102,19 @@ private:
     wxPoint SnapToStep(const wxPoint& p) const;     // 半格吸附
     void RerouteWiresForMovedComponent(int compIdx); // 线跟随重算
 
+    int selectedWireIndex = -1;          // 选中的连线（wires 数组下标）
+
+    // 命中测试：点是否命中某条折线（返回下标；未命中返回 -1）
+    int HitTestWire(const wxPoint& pt) const;    
+
+    // 点到线段的平方距离（内部工具）
+    static int Dist2_PointToSeg(const wxPoint& p, const wxPoint& a, const wxPoint& b); 
 
     // 参数
     static constexpr int GRID = 20;
     static constexpr int STEP = GRID / 2;           // 半格步进
     static constexpr int SNAP_PIN_RADIUS = 12;   // 鼠标在这个半径内就吸附到引脚
+
+    // 线条命中阈值（像素）
+    static constexpr int LINE_HIT_PX = 6;
 };

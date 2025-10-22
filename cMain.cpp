@@ -121,10 +121,10 @@ void cMain::OnToolSelected(wxCommandEvent& evt)
         SetStatusText("当前工具: Hand (画线)");
     }
     else if (id == ID_TOOL_DELETE) {
-        drawBoard->DeleteSelectedGate();
+        drawBoard->DeleteSelection();
         selectedGateName.Clear();              // 清空元器件选择
         drawBoard->pSelectedGateName->Clear(); // 同步清空画板里的指针
-        SetStatusText("已删除选中的元器件");
+        SetStatusText("已删除选中的对象");
         m_toolBar->ToggleTool(ID_TOOL_ARROW, true);
         drawBoard->currentTool = ID_TOOL_ARROW;
         drawBoard->SetCursor(wxCURSOR_ARROW);

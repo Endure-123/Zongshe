@@ -52,6 +52,21 @@ void DrawBoard::OnPaint(wxPaintEvent& event)
             }
         }
 
+        // ====== A1) 如果有选中的连线，绘制两端两点定位 ======
+        if (selectedWireIndex >= 0 && selectedWireIndex < (int)wires.size()) {
+            const auto& poly = wires[selectedWireIndex];
+            if (poly.size() >= 2) {
+                const wxPoint& p0 = poly.front();
+                const wxPoint& p1 = poly.back();
+
+                gc->SetPen(wxPen(wxColour(128, 128, 128), 2));
+                gc->SetBrush(*wxWHITE_BRUSH);
+                const int r = 5; // 半径
+                gc->DrawEllipse(p0.x - r, p0.y - r, 2 * r, 2 * r);
+                gc->DrawEllipse(p1.x - r, p1.y - r, 2 * r, 2 * r);
+            }
+        }
+
         // ====== B) 临时预览线（曼哈顿折线 + 吸附）======
         if (isRouting) {                                 // ★ 用 isRouting
             wxPoint hover = mousePos;
@@ -157,6 +172,15 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
             selectedGateIndex = -1;
             m_draggingIndex = -1;
             m_isDragging = false;
+
+            // ★ 试图命中线条
+            int w = HitTestWire(pos);
+            if (w >= 0) {
+                selectedWireIndex = w;
+            }
+            else {
+                selectedWireIndex = -1;
+            }
             Refresh();
         }
     }
@@ -566,4 +590,64 @@ void DrawBoard::RerouteWiresForMovedComponent(int compIdx)
 
     // 为连续拖动做准备
     preMovePins = newPins;
+}
+
+void DrawBoard::DeleteSelectedWire() {
+    if (selectedWireIndex >= 0 && selectedWireIndex < (int)wires.size()) {
+        wires.erase(wires.begin() + selectedWireIndex);
+        selectedWireIndex = -1;
+        Refresh(false);
+    }
+}
+
+void DrawBoard::DeleteSelection() {
+    if (selectedGateIndex >= 0) {
+        DeleteSelectedGate();
+        return;
+    }
+    if (selectedWireIndex >= 0) {
+        DeleteSelectedWire();
+        return;
+    }
+    // 什么也没选中就不做事
+}
+
+int DrawBoard::Dist2_PointToSeg(const wxPoint& p, const wxPoint& a, const wxPoint& b)
+{
+    // 向量法：投影到 AB，夹在 [0,1] 区间内；返回平方距离避免开方
+    const int vx = b.x - a.x;
+    const int vy = b.y - a.y;
+    const int wx = p.x - a.x;
+    const int wy = p.y - a.y;
+
+    const int vv = vx * vx + vy * vy;
+    if (vv == 0) { // 退化为点
+        const int dx = p.x - a.x;
+        const int dy = p.y - a.y;
+        return dx * dx + dy * dy;
+    }
+    // t = (w·v)/|v|^2
+    const double t = (wx * vx + wy * vy) / (double)vv;
+    double clamped = t < 0 ? 0 : (t > 1 ? 1 : t);
+
+    const double projx = a.x + clamped * vx;
+    const double projy = a.y + clamped * vy;
+    const double dx = p.x - projx;
+    const double dy = p.y - projy;
+    return int(dx * dx + dy * dy);
+}
+
+int DrawBoard::HitTestWire(const wxPoint& pt) const
+{
+    const int th2 = LINE_HIT_PX * LINE_HIT_PX; // 命中阈值的平方
+    // 从上往下优先“最上层”（与门的命中逻辑一致，倒序遍历更像“后画的在上面”）
+    for (int i = (int)wires.size() - 1; i >= 0; --i) {
+        const auto& poly = wires[i];
+        for (size_t k = 1; k < poly.size(); ++k) {
+            if (Dist2_PointToSeg(pt, poly[k - 1], poly[k]) <= th2) {
+                return i;
+            }
+        }
+    }
+    return -1;
 }
