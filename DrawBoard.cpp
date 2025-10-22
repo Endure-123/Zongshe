@@ -274,18 +274,34 @@ void DrawBoard::SaveToJson(const std::string& filename)
 {
     Json::Value root;
 
-    // 线
-    for (auto& line : lines) {
-        Json::Value obj;
-        obj["type"] = "Line";
-        obj["x1"] = line.first.x;
-        obj["y1"] = line.first.y;
-        obj["x2"] = line.second.x;
-        obj["y2"] = line.second.y;
-        root["shapes"].append(obj);
+    // ====== 1) 连线（折线）：wires ======
+    // 格式： "wires": [ [ {"x":..,"y":..}, {"x":..,"y":..}, ... ],  ... ]
+    for (const auto& poly : wires) {
+        if (poly.size() < 2) continue; // 忽略无效折线
+        Json::Value arr(Json::arrayValue);
+        for (const auto& p : poly) {
+            Json::Value node;
+            node["x"] = p.x;
+            node["y"] = p.y;
+            arr.append(node);
+        }
+        root["wires"].append(arr);
     }
 
-    // 文本
+    // ====== 2) 兼容旧直线（可选）：如仍在用 lines，则也序列化到 oldShapes，便于调试/过渡 ======
+    if (!lines.empty()) {
+        for (auto& line : lines) {
+            Json::Value obj;
+            obj["type"] = "Line";
+            obj["x1"] = line.first.x;
+            obj["y1"] = line.first.y;
+            obj["x2"] = line.second.x;
+            obj["y2"] = line.second.y;
+            root["oldShapes"].append(obj);
+        }
+    }
+
+    // ====== 3) 文本 ======
     for (auto& txt : texts) {
         Json::Value obj;
         obj["content"] = std::string(txt.second.mb_str());
@@ -294,7 +310,7 @@ void DrawBoard::SaveToJson(const std::string& filename)
         root["texts"].append(obj);
     }
 
-    // 门
+    // ====== 4) 门元件 ======
     for (auto& c : components) {
         Json::Value obj;
         obj["name"] = TypeToName(c->m_type);
@@ -311,6 +327,7 @@ void DrawBoard::SaveToJson(const std::string& filename)
     writer->write(root, &ofs);
 }
 
+
 void DrawBoard::LoadFromJson(const std::string& filename)
 {
     std::ifstream ifs(filename);
@@ -321,38 +338,83 @@ void DrawBoard::LoadFromJson(const std::string& filename)
     Json::Value root;
     ifs >> root;
 
+    // 清空
+    wires.clear();
     lines.clear();
     texts.clear();
     components.clear();
 
-    // 线
-    for (auto& obj : root["shapes"]) {
-        wxPoint p1(obj["x1"].asInt(), obj["y1"].asInt());
-        wxPoint p2(obj["x2"].asInt(), obj["y2"].asInt());
-        lines.push_back({ p1, p2 });
+    // ====== 1) 先尝试读取新格式：wires（折线）======
+    if (root.isMember("wires") && root["wires"].isArray()) {
+        for (const auto& arr : root["wires"]) {
+            if (!arr.isArray() || arr.size() < 2) continue;
+            std::vector<wxPoint> poly;
+            poly.reserve(arr.size());
+            for (const auto& node : arr) {
+                int x = node.get("x", 0).asInt();
+                int y = node.get("y", 0).asInt();
+                poly.emplace_back(x, y);
+            }
+            if (poly.size() >= 2) wires.push_back(std::move(poly));
+        }
     }
 
-    // 文本
-    for (auto& obj : root["texts"]) {
-        wxPoint p(obj["x"].asInt(), obj["y"].asInt());
-        wxString content = wxString::FromUTF8(obj["content"].asCString());
-        texts.push_back({ p, content });
+    // ====== 2) 兼容旧数据：shapes（x1,y1,x2,y2 直线）======
+    // 若文件中仍存在旧的 shapes，就把它们转成两点的折线追加到 wires
+    if (root.isMember("shapes") && root["shapes"].isArray()) {
+        for (const auto& obj : root["shapes"]) {
+            // 只认旧的 "Line" 类型
+            if (!obj.isObject()) continue;
+            if (obj.isMember("type") && std::string(obj["type"].asCString()) == "Line") {
+                wxPoint p1(obj["x1"].asInt(), obj["y1"].asInt());
+                wxPoint p2(obj["x2"].asInt(), obj["y2"].asInt());
+                if (!(p1 == p2)) {
+                    wires.push_back({ p1, p2 });
+                }
+            }
+        }
     }
 
-    // 门
-    for (auto& obj : root["gates"]) {
-        wxPoint center(obj["x"].asInt(), obj["y"].asInt());
-        wxString name = wxString::FromUTF8(obj["name"].asCString());
-        auto comp = MakeComponent(NameToType(name), center);
-        if (comp) {
-            if (obj.isMember("scale")) comp->scale = obj["scale"].asDouble();
-            comp->UpdateGeometry();
-            components.push_back(std::move(comp));
+    // （可选）兼容我们在 SaveToJson 中额外写的 oldShapes
+    if (root.isMember("oldShapes") && root["oldShapes"].isArray()) {
+        for (const auto& obj : root["oldShapes"]) {
+            if (!obj.isObject()) continue;
+            if (obj.isMember("type") && std::string(obj["type"].asCString()) == "Line") {
+                wxPoint p1(obj["x1"].asInt(), obj["y1"].asInt());
+                wxPoint p2(obj["x2"].asInt(), obj["y2"].asInt());
+                if (!(p1 == p2)) {
+                    wires.push_back({ p1, p2 });
+                }
+            }
+        }
+    }
+
+    // ====== 3) 文本 ======
+    if (root.isMember("texts") && root["texts"].isArray()) {
+        for (auto& obj : root["texts"]) {
+            wxPoint p(obj.get("x", 0).asInt(), obj.get("y", 0).asInt());
+            wxString content = wxString::FromUTF8(obj.get("content", "").asCString());
+            texts.push_back({ p, content });
+        }
+    }
+
+    // ====== 4) 门 ======
+    if (root.isMember("gates") && root["gates"].isArray()) {
+        for (auto& obj : root["gates"]) {
+            wxPoint center(obj.get("x", 0).asInt(), obj.get("y", 0).asInt());
+            wxString name = wxString::FromUTF8(obj.get("name", "").asCString());
+            auto comp = MakeComponent(NameToType(name), center);
+            if (comp) {
+                if (obj.isMember("scale")) comp->scale = obj["scale"].asDouble();
+                comp->UpdateGeometry();
+                components.push_back(std::move(comp));
+            }
         }
     }
 
     Refresh();
 }
+
 
 // ============ 小工具 ============
 std::array<wxPoint, 4> DrawBoard::GetGateAnchorPoints(const Component* comp) const
