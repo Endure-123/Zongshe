@@ -61,26 +61,3 @@ wxBitmap ResourceManager::LoadBitmap(const wxString& imgDir, const wxString& nam
     }
     return wxBitmap(img);
 }
-
-wxBitmap ResourceManager::LoadBitmapByPercent(const wxString& imgDir, const wxString& name, int scalePercent)
-{
-    wxImage img(imgDir + name + ".png", wxBITMAP_TYPE_PNG);
-    if (!img.IsOk()) {
-        wxImage placeholder(32, 32);
-        placeholder.SetRGB(wxRect(0, 0, 32, 32), 255, 0, 0);
-        return wxBitmap(placeholder);
-    }
-
-    if (!img.HasAlpha()) img.InitAlpha();
-
-    // 合法化百分比，默认 100%
-    if (scalePercent <= 0) scalePercent = 100;
-
-    if (scalePercent != 100) {
-        int newW = (int)std::max(1.0, std::floor(img.GetWidth() * (scalePercent / 100.0)));
-        int newH = (int)std::max(1.0, std::floor(img.GetHeight() * (scalePercent / 100.0)));
-        img.Rescale(newW, newH, wxIMAGE_QUALITY_HIGH);
-    }
-
-    return wxBitmap(img);
-}

@@ -22,6 +22,7 @@
     <ClInclude Include="AppConfig.h" />
     <ClInclude Include="cApp.h" />
     <ClInclude Include="cMain.h" />
+    <ClInclude Include="Component.h" />
     <ClInclude Include="DrawBoard.h" />
     <ClInclude Include="json\json-forwards.h" />
     <ClInclude Include="json\json.h" />
@@ -30,6 +31,7 @@
   <ItemGroup>
     <ClCompile Include="cApp.cpp" />
     <ClCompile Include="cMain.cpp" />
+    <ClCompile Include="Component.cpp" />
     <ClCompile Include="DrawBoard.cpp" />
     <ClCompile Include="json\jsoncpp.cpp" />
     <ClCompile Include="ResourceManager.cpp" />
