@@ -115,9 +115,15 @@ void DrawBoard::OnButtonMove(wxMouseEvent& event)
     // 拖动组件
     if (m_isDragging && m_draggingIndex >= 0 && m_draggingIndex < (int)components.size()) {
         const wxPoint delta = mousePos - m_dragStartMouse;
-        components[m_draggingIndex]->SetCenter(m_dragStartCenter + delta);
-        Refresh(false);
+        wxPoint target = m_dragStartCenter + delta;
+        wxPoint snapped = SnapToStep(target);                       // 半格吸附
+        if (snapped != components[m_draggingIndex]->GetCenter()) {
+            components[m_draggingIndex]->SetCenter(snapped);
+            RerouteWiresForMovedComponent(m_draggingIndex);         // 线端点跟随并重算
+            Refresh(false);
+        }
         return;
+
     }
     Refresh();
 }
@@ -142,6 +148,8 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
             m_isDragging = true;
             m_dragStartMouse = pos;
             m_dragStartCenter = components[hit]->GetCenter();
+            // 记录移动前引脚坐标
+            preMovePins = components[hit]->GetPins();
             if (!HasCapture()) CaptureMouse();
             Refresh();
         }
@@ -191,6 +199,7 @@ void DrawBoard::OnLeftUp(wxMouseEvent& event)
         m_isDragging = false;
         m_draggingIndex = -1;
         if (HasCapture()) ReleaseMouse();
+        preMovePins.clear();
         Refresh();
     }
 
@@ -227,7 +236,7 @@ void DrawBoard::ClearPics() { lines.clear(); Refresh(); }
 void DrawBoard::AddGate(const wxPoint& center, const wxString& typeName)
 {
     ComponentType t = NameToType(typeName);
-    auto comp = MakeComponent(t, center);
+    auto comp = MakeComponent(t, SnapToStep(center));
     if (comp) {
         components.push_back(std::move(comp));
         Refresh();
@@ -450,3 +459,49 @@ wxPoint DrawBoard::SnapToGrid(const wxPoint& p) const
     return wxPoint(roundTo(p.x, GRID), roundTo(p.y, GRID));
 }
 
+wxPoint DrawBoard::SnapToStep(const wxPoint& p) const
+{
+    auto roundTo = [](int v, int step) {
+        int r = (v + step / 2) / step;
+        return r * step;
+        };
+    return wxPoint(roundTo(p.x, STEP), roundTo(p.y, STEP));
+}
+
+void DrawBoard::RerouteWiresForMovedComponent(int compIdx)
+{
+    if (compIdx < 0 || compIdx >= (int)components.size()) return;
+
+    // 移动后的引脚坐标
+    const auto newPins = components[compIdx]->GetPins();
+
+    // 遍历所有折线：如果端点等于 preMovePins 的某个点，就替换为对应的新引脚
+    for (auto& poly : wires) {
+        if (poly.size() < 2) continue;
+
+        bool changed = false;
+        wxPoint start = poly.front();
+        wxPoint end = poly.back();
+
+        auto findPinIdx = [](const std::vector<wxPoint>& pins, const wxPoint& p) -> int {
+            for (int i = 0; i < (int)pins.size(); ++i) {
+                if (pins[i] == p) return i;
+            }
+            return -1;
+            };
+
+        int sIdx = findPinIdx(preMovePins, start);
+        int eIdx = findPinIdx(preMovePins, end);
+
+        if (sIdx >= 0) { start = newPins[sIdx]; changed = true; }
+        if (eIdx >= 0) { end = newPins[eIdx]; changed = true; }
+
+        if (changed) {
+            // 重新生成 L 形折线，保持正交
+            poly = MakeManhattan(start, end);
+        }
+    }
+
+    // 为连续拖动做准备
+    preMovePins = newPins;
+}

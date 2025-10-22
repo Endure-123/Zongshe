@@ -73,6 +73,9 @@ private:
 
     // 计算锚点（由门对象的 m_BoundaryPoints 给出）
     std::array<wxPoint, 4> GetGateAnchorPoints(const Component* comp) const;
+    // 该元件移动前的引脚坐标
+    std::vector<wxPoint> preMovePins;               
+
 
     // 工具：名字↔类型映射 + 工厂
     static ComponentType NameToType(const wxString& s);
@@ -85,16 +88,21 @@ private:
     static constexpr int  HANDLE_RADIUS_PX = 5;
     static constexpr int  HANDLE_STROKE_PX = 1;
 
-    // ★ 新增：找到最近引脚（返回是否命中），out 为吸附后的坐标
+    // 找到最近引脚（返回是否命中），out 为吸附后的坐标
     bool FindNearestPin(const wxPoint& p, wxPoint& out, int* compIdx = nullptr) const;
 
-    // ★ 新增：生成 L 形曼哈顿路径（start→end），优先水平再垂直（或反之均可）
+    // 生成 L 形曼哈顿路径（start→end），优先水平再垂直（或反之均可）
     std::vector<wxPoint> MakeManhattan(const wxPoint& a, const wxPoint& b) const;
 
-    // ★ 新增：可选：吸附到网格（若你想要）
+    // 可选：吸附到网格
     wxPoint SnapToGrid(const wxPoint& p) const;
+
+    wxPoint SnapToStep(const wxPoint& p) const;     // 半格吸附
+    void RerouteWiresForMovedComponent(int compIdx); // 线跟随重算
+
 
     // 参数
     static constexpr int GRID = 20;
+    static constexpr int STEP = GRID / 2;           // 半格步进
     static constexpr int SNAP_PIN_RADIUS = 12;   // 鼠标在这个半径内就吸附到引脚
 };
