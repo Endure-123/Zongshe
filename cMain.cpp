@@ -3,7 +3,7 @@
 #include "ResourceManager.h"
 #include <vector>
 
-// ★ 新增：属性面板与选择事件头
+// ★ 属性面板与选择事件
 #include "PropertyPane.h"
 #include "SelectionEvents.h"
 
@@ -13,7 +13,7 @@ EVT_MENU(2001, cMain::OnClearTexts)
 EVT_MENU(2002, cMain::OnClearPics)
 wxEND_EVENT_TABLE()
 
-wxBitmap cMain::LoadToolBitmap(const wxString& filename, int size)
+wxBitmap cMain::LoadToolBitmap(const wxString & filename, int size)
 {
     return ResourceManager::LoadBitmap(IMG_DIR, filename, size);
 }
@@ -55,17 +55,35 @@ cMain::cMain()
     Bind(wxEVT_MENU, &cMain::OnSaveJson, this, ID_SaveJSON);
     Bind(wxEVT_MENU, &cMain::OnLoadJson, this, ID_LoadJSON);
 
-    // ---------------- 主体区域：左树 + 画布（使用分割窗） ----------------
+    // ===================== 主体区域：左(树+属性) | 右(画布) =====================
+    // 外层左右分割：左侧容器 + 右侧画布
     m_splitter = new wxSplitterWindow(this, wxID_ANY);
+    m_splitter->SetMinimumPaneSize(200);
+
+    // --- 右侧：绘图画布 ---
+    drawBoard = new DrawBoard(m_splitter);
+    drawBoard->pSelectedGateName = &selectedGateName;
+
+    // --- 左侧：面板容器，内部再做上下分割（上资源树 / 下属性面板） ---
     m_leftPanel = new wxPanel(m_splitter, wxID_ANY);
-    wxBoxSizer* leftSizer = new wxBoxSizer(wxVERTICAL);
+    auto* leftRootSizer = new wxBoxSizer(wxVERTICAL);
+
+    // 左侧内部上下分割器
+    auto* leftSplit = new wxSplitterWindow(m_leftPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+        wxSP_3D | wxSP_LIVE_UPDATE);
+    leftSplit->SetMinimumPaneSize(120);
+    leftSplit->SetSashGravity(1.0);      // 缩放时优先让上半区伸缩，底部属性保持高度
+
+    // 上半：资源树面板
+    auto* treePanel = new wxPanel(leftSplit, wxID_ANY);
+    auto* treeSizer = new wxBoxSizer(wxVERTICAL);
 
     // 资源树
     std::vector<wxString> gateNames;
     wxImageList* imgList = ResourceManager::LoadImageList(IMG_DIR, gateNames);
 
-    m_treeCtrl = new wxTreeCtrl(m_leftPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-        wxTR_HAS_BUTTONS | wxTR_LINES_AT_ROOT);
+    m_treeCtrl = new wxTreeCtrl(treePanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+        wxTR_HAS_BUTTONS | wxTR_LINES_AT_ROOT | wxTR_SINGLE);
     wxTreeItemId root = m_treeCtrl->AddRoot("Gates", 0);
     for (size_t i = 0; i < gateNames.size(); ++i) {
         m_treeCtrl->AppendItem(root, gateNames[i], static_cast<int>(i + 1));
@@ -73,35 +91,31 @@ cMain::cMain()
     m_treeCtrl->AssignImageList(imgList);
     m_treeCtrl->Expand(root);
 
-    leftSizer->Add(m_treeCtrl, 1, wxEXPAND | wxALL, 2);
-    m_leftPanel->SetSizer(leftSizer);
+    treeSizer->Add(m_treeCtrl, 1, wxEXPAND | wxALL, 2);
+    treePanel->SetSizer(treeSizer);
 
+    // 下半：属性面板（宽度天然与左侧一致）
+    m_prop = new PropertyPane(leftSplit, drawBoard);
+
+    // 从底部起固定 260 像素给属性面板
+    leftSplit->SplitHorizontally(treePanel, m_prop, -260);
+
+    // 左侧容器装入上下分割器
+    leftRootSizer->Add(leftSplit, 1, wxEXPAND);
+    m_leftPanel->SetSizer(leftRootSizer);
+
+    // 最外层左右分割：左侧(树+属性) | 右侧(画布)
+    m_splitter->SplitVertically(m_leftPanel, drawBoard, 300);
+
+    // ===================== （可选）使用 AUI 托管 Center =====================
+    // 如果你的工程已在用 AUI，这里仅让它接管整个左右分割窗口即可。
+    m_aui.SetManagedWindow(this);
+    m_aui.AddPane(m_splitter, wxAuiPaneInfo().CenterPane());
+    m_aui.Update();
+
+    // 资源树事件
     m_treeCtrl->Bind(wxEVT_TREE_ITEM_ACTIVATED, &cMain::OnTreeItemActivated, this);
     m_treeCtrl->Bind(wxEVT_TREE_SEL_CHANGED, &cMain::OnTreeSelChanged, this);
-
-    // 绘图画布
-    drawBoard = new DrawBoard(m_splitter);
-    drawBoard->pSelectedGateName = &selectedGateName;
-
-    m_splitter->SplitVertically(m_leftPanel, drawBoard, 300);
-    m_splitter->SetMinimumPaneSize(200);
-
-    // ---------------- AUI：把分割窗放 Center，把属性面板 Dock 到左下 ----------------
-    m_aui.SetManagedWindow(this);  // 让 AUI 接管当前 Frame
-
-    // CenterPane：原有分割窗口
-    m_aui.AddPane(m_splitter, wxAuiPaneInfo().CenterPane());
-
-    // 左下角属性面板
-    m_prop = new PropertyPane(this, drawBoard);
-    m_aui.AddPane(m_prop, wxAuiPaneInfo()
-        .Left().Bottom()
-        .Caption("Properties")
-        .BestSize(320, 260)
-        .MinSize(260, 200)
-        .CloseButton(false).MaximizeButton(false));
-
-    m_aui.Update();
 
     // DrawBoard 选择变化 → 刷新属性面板
     Bind(EVT_SELECTION_CHANGED, [this](wxCommandEvent&) {
@@ -138,7 +152,7 @@ void cMain::OnToolSelected(wxCommandEvent& evt)
         SetStatusText("当前工具: Arrow (选择)");
     }
     else if (id == ID_TOOL_TEXT) {
-        selectedGateName.Clear();  // 清空元器件选择
+        selectedGateName.Clear();
         drawBoard->currentTool = ID_TOOL_TEXT;
         drawBoard->isDrawingLine = false;
         drawBoard->isInsertingText = true;
@@ -146,7 +160,7 @@ void cMain::OnToolSelected(wxCommandEvent& evt)
         SetStatusText("当前工具: Text (插入文本)");
     }
     else if (id == ID_TOOL_HAND) {
-        selectedGateName.Clear();  // 清空元器件选择
+        selectedGateName.Clear();
         drawBoard->currentTool = ID_TOOL_HAND;
         drawBoard->isDrawingLine = true;
         drawBoard->isInsertingText = false;
@@ -155,8 +169,8 @@ void cMain::OnToolSelected(wxCommandEvent& evt)
     }
     else if (id == ID_TOOL_DELETE) {
         drawBoard->DeleteSelection();
-        selectedGateName.Clear();              // 清空元器件选择
-        drawBoard->pSelectedGateName->Clear(); // 同步清空画板里的指针
+        selectedGateName.Clear();
+        drawBoard->pSelectedGateName->Clear();
         SetStatusText("已删除选中的对象");
         m_toolBar->ToggleTool(ID_TOOL_ARROW, true);
         drawBoard->currentTool = ID_TOOL_ARROW;

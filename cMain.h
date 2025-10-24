@@ -3,7 +3,7 @@
 #include <wx/wx.h>
 #include <wx/splitter.h>
 #include <wx/treectrl.h>
-#include <wx/aui/aui.h>      // ★ 新增：AUI
+#include <wx/aui/aui.h>      // AUI
 #include "DrawBoard.h"
 #include "AppConfig.h"
 
@@ -22,7 +22,7 @@ public:
     ~cMain();
 
 private:
-    // ★ 新增：AUI 布局管理器（管理 CenterPane / 左下属性面板等）
+    // AUI 布局管理器（管理 CenterPane / 左下属性面板等）
     wxAuiManager m_aui;
 
     wxMenuBar* menuBar = nullptr;
@@ -36,7 +36,7 @@ private:
 
     DrawBoard* drawBoard = nullptr;
 
-    // ★ 新增：属性面板指针
+    // 属性面板指针
     PropertyPane* m_prop = nullptr;
 
     wxString selectedGateName;
@@ -51,6 +51,11 @@ private:
     void OnTreeItemActivated(wxTreeEvent& event);
     void OnTreeSelChanged(wxTreeEvent& event);
     void SetSelectedGate(const wxString& label);
+
+    wxAuiManager m_mgr;
+    wxSplitterWindow* m_leftSplitter = nullptr;
+    wxPanel* m_treePanel = nullptr;
+    PropertyPane* m_propPane = nullptr;
 
     // JSON 保存/加载
     void OnSaveJson(wxCommandEvent& evt);
