@@ -3,6 +3,10 @@
 #include "ResourceManager.h"
 #include <vector>
 
+// ★ 新增：属性面板与选择事件头
+#include "PropertyPane.h"
+#include "SelectionEvents.h"
+
 wxBEGIN_EVENT_TABLE(cMain, wxFrame)
 EVT_MENU(wxID_EXIT, cMain::OnExit)
 EVT_MENU(2001, cMain::OnClearTexts)
@@ -51,7 +55,7 @@ cMain::cMain()
     Bind(wxEVT_MENU, &cMain::OnSaveJson, this, ID_SaveJSON);
     Bind(wxEVT_MENU, &cMain::OnLoadJson, this, ID_LoadJSON);
 
-    // 分割窗口
+    // ---------------- 主体区域：左树 + 画布（使用分割窗） ----------------
     m_splitter = new wxSplitterWindow(this, wxID_ANY);
     m_leftPanel = new wxPanel(m_splitter, wxID_ANY);
     wxBoxSizer* leftSizer = new wxBoxSizer(wxVERTICAL);
@@ -64,7 +68,7 @@ cMain::cMain()
         wxTR_HAS_BUTTONS | wxTR_LINES_AT_ROOT);
     wxTreeItemId root = m_treeCtrl->AddRoot("Gates", 0);
     for (size_t i = 0; i < gateNames.size(); ++i) {
-        m_treeCtrl->AppendItem(root, gateNames[i], i + 1);
+        m_treeCtrl->AppendItem(root, gateNames[i], static_cast<int>(i + 1));
     }
     m_treeCtrl->AssignImageList(imgList);
     m_treeCtrl->Expand(root);
@@ -82,11 +86,40 @@ cMain::cMain()
     m_splitter->SplitVertically(m_leftPanel, drawBoard, 300);
     m_splitter->SetMinimumPaneSize(200);
 
+    // ---------------- AUI：把分割窗放 Center，把属性面板 Dock 到左下 ----------------
+    m_aui.SetManagedWindow(this);  // 让 AUI 接管当前 Frame
+
+    // CenterPane：原有分割窗口
+    m_aui.AddPane(m_splitter, wxAuiPaneInfo().CenterPane());
+
+    // 左下角属性面板
+    m_prop = new PropertyPane(this, drawBoard);
+    m_aui.AddPane(m_prop, wxAuiPaneInfo()
+        .Left().Bottom()
+        .Caption("Properties")
+        .BestSize(320, 260)
+        .MinSize(260, 200)
+        .CloseButton(false).MaximizeButton(false));
+
+    m_aui.Update();
+
+    // DrawBoard 选择变化 → 刷新属性面板
+    Bind(EVT_SELECTION_CHANGED, [this](wxCommandEvent&) {
+        if (m_prop) m_prop->RebuildBySelection();
+        });
+
     CreateStatusBar();
     SetStatusText("Ready - 当前工具: Arrow");
+
+    // 初始化为空态页面
+    if (m_prop) m_prop->RebuildBySelection();
 }
 
-cMain::~cMain() {}
+cMain::~cMain()
+{
+    // 释放 AUI 管理器
+    m_aui.UnInit();
+}
 
 void cMain::OnExit(wxCommandEvent& evt) { Close(true); }
 void cMain::OnClearTexts(wxCommandEvent& evt) { drawBoard->ClearTexts(); }

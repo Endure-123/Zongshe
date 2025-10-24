@@ -39,6 +39,12 @@
     <ClInclude Include="Component.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="SelectionEvents.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="PropertyPane.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ResourceManager.cpp">
@@ -57,6 +63,9 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="Component.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="PropertyPane.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

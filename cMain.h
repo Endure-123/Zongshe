@@ -1,7 +1,9 @@
 ﻿#pragma once
+
 #include <wx/wx.h>
 #include <wx/splitter.h>
 #include <wx/treectrl.h>
+#include <wx/aui/aui.h>      // ★ 新增：AUI
 #include "DrawBoard.h"
 #include "AppConfig.h"
 
@@ -10,6 +12,9 @@ enum {
     ID_LoadJSON
 };
 
+// 前向声明：属性面板，避免头文件循环依赖
+class PropertyPane;
+
 class cMain : public wxFrame
 {
 public:
@@ -17,6 +22,9 @@ public:
     ~cMain();
 
 private:
+    // ★ 新增：AUI 布局管理器（管理 CenterPane / 左下属性面板等）
+    wxAuiManager m_aui;
+
     wxMenuBar* menuBar = nullptr;
     wxMenu* fileMenu = nullptr;
     wxMenu* editMenu = nullptr;
@@ -27,6 +35,9 @@ private:
     wxTreeCtrl* m_treeCtrl = nullptr;
 
     DrawBoard* drawBoard = nullptr;
+
+    // ★ 新增：属性面板指针
+    PropertyPane* m_prop = nullptr;
 
     wxString selectedGateName;
 

@@ -26,7 +26,9 @@
     <ClInclude Include="DrawBoard.h" />
     <ClInclude Include="json\json-forwards.h" />
     <ClInclude Include="json\json.h" />
+    <ClInclude Include="PropertyPane.h" />
     <ClInclude Include="ResourceManager.h" />
+    <ClInclude Include="SelectionEvents.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="cApp.cpp" />
@@ -34,6 +36,7 @@
     <ClCompile Include="Component.cpp" />
     <ClCompile Include="DrawBoard.cpp" />
     <ClCompile Include="json\jsoncpp.cpp" />
+    <ClCompile Include="PropertyPane.cpp" />
     <ClCompile Include="ResourceManager.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

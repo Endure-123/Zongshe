@@ -8,6 +8,10 @@
 #include <json/json.h>
 #include "AppConfig.h"
 #include "Component.h"   // ← 引入矢量门
+#include "SelectionEvents.h" // ← 自定义选择变化事件
+
+// 统一选择类型（供属性面板查询）
+enum class SelKind { None = 0, Gate = 1, Wire = 2 };
 
 class DrawBoard : public wxPanel
 {
@@ -31,14 +35,14 @@ public:
     std::vector<std::vector<wxPoint>> wires;
 
     // 画线状态
-    wxPoint lineStart;                               // ★ 新增：起点（已吸附/对齐后）
-    bool    isRouting = false;                       // ★ 新增：是否正在画线
+    wxPoint lineStart;                               // 起点（已吸附/对齐后）
+    bool    isRouting = false;                       // 是否正在画线
 
     // 直线与文本仍保持你的原结构
     std::vector<std::pair<wxPoint, wxPoint>> lines;
     std::vector<std::pair<wxPoint, wxString>> texts;
 
-    // ⭐ 组件集合：改为矢量门对象
+    // ⭐ 组件集合：矢量门对象
     std::vector<std::unique_ptr<Component>> components;
 
     wxStaticText* st1;
@@ -47,11 +51,20 @@ public:
     // 指向 cMain 的“当前选中元件类型名称”（例如 "AND", "OR", "NOT"...）
     wxString* pSelectedGateName = nullptr;
 
+    // === 属性面板查询所需的选择状态接口 ===
+    SelKind GetSelectionKind() const { return m_selKind; }
+    long    GetSelectionId()   const { return m_selId; } // Gate / Wire 的索引
+
+    // 可选：外部强制切换（目前面板不调用，预留）
+    void SelectNone();
+    void SelectGateByIndex(int idx);
+    void SelectWireByIndex(int idx);
+
     // 对外功能
     void AddGate(const wxPoint& center, const wxString& typeName);
     void SelectGate(const wxPoint& pos);
     void DeleteSelectedGate();
-    void DeleteSelectedWire();               
+    void DeleteSelectedWire();
     void DeleteSelection();                  // 优先删除元件，否则删除线
     void ClearTexts();
     void ClearPics();
@@ -66,6 +79,10 @@ public:
     // （可选）对外暴露：获取当前选中元件的四个锚点
     std::vector<wxPoint> GetSelectedGateAnchors() const;
 
+    // 工具：名字↔类型映射 + 工厂
+    static ComponentType NameToType(const wxString& s);
+    static const char* TypeToName(ComponentType t);
+
 private:
     void OnPaint(wxPaintEvent& event);
     void OnButtonMove(wxMouseEvent& event);
@@ -76,12 +93,9 @@ private:
     // 计算锚点（由门对象的 m_BoundaryPoints 给出）
     std::array<wxPoint, 4> GetGateAnchorPoints(const Component* comp) const;
     // 该元件移动前的引脚坐标
-    std::vector<wxPoint> preMovePins;               
+    std::vector<wxPoint> preMovePins;
 
-
-    // 工具：名字↔类型映射 + 工厂
-    static ComponentType NameToType(const wxString& s);
-    static const char* TypeToName(ComponentType t);
+    
     static std::unique_ptr<Component> MakeComponent(ComponentType t, const wxPoint& center);
 
     // 选中锚点样式（如需要你也可以自己画四点；各门类也会在选中时自行画定位点）
@@ -99,22 +113,29 @@ private:
     // 可选：吸附到网格
     wxPoint SnapToGrid(const wxPoint& p) const;
 
-    wxPoint SnapToStep(const wxPoint& p) const;     // 半格吸附
+    wxPoint SnapToStep(const wxPoint& p) const;      // 半格吸附
     void RerouteWiresForMovedComponent(int compIdx); // 线跟随重算
 
     int selectedWireIndex = -1;          // 选中的连线（wires 数组下标）
 
     // 命中测试：点是否命中某条折线（返回下标；未命中返回 -1）
-    int HitTestWire(const wxPoint& pt) const;    
+    int HitTestWire(const wxPoint& pt) const;
 
     // 点到线段的平方距离（内部工具）
-    static int Dist2_PointToSeg(const wxPoint& p, const wxPoint& a, const wxPoint& b); 
+    static int Dist2_PointToSeg(const wxPoint& p, const wxPoint& a, const wxPoint& b);
 
     // 参数
     static constexpr int GRID = 20;
-    static constexpr int STEP = GRID / 2;           // 半格步进
-    static constexpr int SNAP_PIN_RADIUS = 12;   // 鼠标在这个半径内就吸附到引脚
+    static constexpr int STEP = GRID / 2;            // 半格步进
+    static constexpr int SNAP_PIN_RADIUS = 12;       // 鼠标在这个半径内就吸附到引脚
 
     // 线条命中阈值（像素）
     static constexpr int LINE_HIT_PX = 6;
+
+    // ★ 新增：统一选择类型与索引（供属性面板/外部查询）
+    SelKind m_selKind = SelKind::None;
+    long    m_selId = -1;
+
+    // ★ 新增：向外发 EVT_SELECTION_CHANGED
+    void NotifySelectionChanged();
 };

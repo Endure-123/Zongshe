@@ -1,9 +1,13 @@
 ﻿#include "DrawBoard.h"
 #include <fstream>
+#include "SelectionEvents.h"  // ★ 新增：选择事件头
 
 // 选中锚点配色
 const wxColour DrawBoard::HANDLE_FILL_RGB(255, 255, 255);
 const wxColour DrawBoard::HANDLE_STROKE_RGB(0, 0, 0);
+
+// ★ 在一个 .cpp 里实现一次全局事件
+wxDEFINE_EVENT(EVT_SELECTION_CHANGED, wxCommandEvent);
 
 DrawBoard::DrawBoard(wxWindow* parent) : wxPanel(parent)
 {
@@ -22,6 +26,10 @@ DrawBoard::DrawBoard(wxWindow* parent) : wxPanel(parent)
     isDrawingLine = false;
     isInsertingText = false;
     isDrawing = false;
+
+    // 统一选择状态初始化
+    m_selKind = SelKind::None;
+    m_selId = -1;
 }
 
 DrawBoard::~DrawBoard() {}
@@ -167,6 +175,11 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
             preMovePins = components[hit]->GetPins();
             if (!HasCapture()) CaptureMouse();
             Refresh();
+
+            // ★ 选中 Gate 并通知
+            m_selKind = SelKind::Gate;
+            m_selId = selectedGateIndex;
+            NotifySelectionChanged();
         }
         else {
             selectedGateIndex = -1;
@@ -177,11 +190,16 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
             int w = HitTestWire(pos);
             if (w >= 0) {
                 selectedWireIndex = w;
+                m_selKind = SelKind::Wire;
+                m_selId = selectedWireIndex;
             }
             else {
                 selectedWireIndex = -1;
+                m_selKind = SelKind::None;
+                m_selId = -1;
             }
             Refresh();
+            NotifySelectionChanged();
         }
     }
 
@@ -249,6 +267,14 @@ void DrawBoard::OnLeftUp(wxMouseEvent& event)
         }
         isRouting = false;
         Refresh();
+
+        // ★ 画完线后默认选中新线并通知
+        if (!wires.empty()) {
+            selectedWireIndex = (int)wires.size() - 1;
+            m_selKind = SelKind::Wire;
+            m_selId = selectedWireIndex;
+            NotifySelectionChanged();
+        }
         return;
     }
 }
@@ -282,6 +308,11 @@ void DrawBoard::DeleteSelectedGate()
         components.erase(components.begin() + selectedGateIndex);
         selectedGateIndex = -1;
         Refresh();
+
+        // ★ 清空统一选择并通知
+        m_selKind = SelKind::None;
+        m_selId = -1;
+        NotifySelectionChanged();
     }
 }
 
@@ -597,6 +628,11 @@ void DrawBoard::DeleteSelectedWire() {
         wires.erase(wires.begin() + selectedWireIndex);
         selectedWireIndex = -1;
         Refresh(false);
+
+        // ★ 清空统一选择并通知
+        m_selKind = SelKind::None;
+        m_selId = -1;
+        NotifySelectionChanged();
     }
 }
 
@@ -650,4 +686,43 @@ int DrawBoard::HitTestWire(const wxPoint& pt) const
         }
     }
     return -1;
+}
+
+// ===== 统一选择接口：事件 & 外部可控选择 =====
+void DrawBoard::NotifySelectionChanged() {
+    wxCommandEvent evt(EVT_SELECTION_CHANGED);
+    evt.SetInt(static_cast<int>(m_selKind)); // SelKind
+    evt.SetExtraLong(m_selId);               // 选中索引
+    wxPostEvent(GetParent(), evt);           // 发给父窗口（如 cMain）
+}
+
+void DrawBoard::SelectNone() {
+    selectedGateIndex = -1;
+    selectedWireIndex = -1;
+    m_selKind = SelKind::None;
+    m_selId = -1;
+    Refresh(false);
+    NotifySelectionChanged();
+}
+
+void DrawBoard::SelectGateByIndex(int idx) {
+    if (idx >= 0 && idx < (int)components.size()) {
+        selectedGateIndex = idx;
+        selectedWireIndex = -1;
+        m_selKind = SelKind::Gate;
+        m_selId = idx;
+        Refresh(false);
+        NotifySelectionChanged();
+    }
+}
+
+void DrawBoard::SelectWireByIndex(int idx) {
+    if (idx >= 0 && idx < (int)wires.size()) {
+        selectedWireIndex = idx;
+        selectedGateIndex = -1;
+        m_selKind = SelKind::Wire;
+        m_selId = idx;
+        Refresh(false);
+        NotifySelectionChanged();
+    }
 }
