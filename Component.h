@@ -10,7 +10,10 @@ enum ComponentType {
     NANDGATE,
     NORGATE,   // 注意：枚举名用 NORGATE（读作 NOR Gate）
     XORGATE,
-    POWER
+    POWER,
+    NODE_BASIC,     // 普通结点（小圆点，多线汇聚）
+    NODE_START,     // 起始节点（信号源，箭头）
+    NODE_END        // 终止节点（空心圆，信号终点）
 };
 
 class Component {
@@ -126,6 +129,47 @@ public:
     }
     void drawSelf(wxMemoryDC& memDC) override;
     bool Isinside(const wxPoint& point) const override;
+    void UpdateGeometry() override;
+    std::vector<wxPoint> GetPins() const override;
+};
+// ---------- 普通结点 ----------
+class NodeDot : public Component {
+public:
+    explicit NodeDot(wxPoint center, ComponentType type = NODE_BASIC)
+        : Component(center, type) {
+        this->scale = 1.0;
+        UpdateGeometry();
+    }
+    void drawSelf(wxMemoryDC& memDC) override;
+    bool Isinside(const wxPoint& p) const override;
+    void UpdateGeometry() override;
+    std::vector<wxPoint> GetPins() const override;
+};
+
+// ---------- 起始节点 ----------
+class StartNode : public Component {
+public:
+    explicit StartNode(wxPoint center, ComponentType type = NODE_START)
+        : Component(center, type) {
+        this->scale = 1.0;
+        UpdateGeometry();
+    }
+    void drawSelf(wxMemoryDC& memDC) override;
+    bool Isinside(const wxPoint& p) const override;
+    void UpdateGeometry() override;
+    std::vector<wxPoint> GetPins() const override;
+};
+
+// ---------- 终止节点 ----------
+class EndNode : public Component {
+public:
+    explicit EndNode(wxPoint center, ComponentType type = NODE_END)
+        : Component(center, type) {
+        this->scale = 1.0;
+        UpdateGeometry();
+    }
+    void drawSelf(wxMemoryDC& memDC) override;
+    bool Isinside(const wxPoint& p) const override;
     void UpdateGeometry() override;
     std::vector<wxPoint> GetPins() const override;
 };

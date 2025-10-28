@@ -78,19 +78,40 @@ cMain::cMain()
     auto* treePanel = new wxPanel(leftSplit, wxID_ANY);
     auto* treeSizer = new wxBoxSizer(wxVERTICAL);
 
-    // 资源树
-    std::vector<wxString> gateNames;
-    wxImageList* imgList = ResourceManager::LoadImageList(IMG_DIR, gateNames);
+    // 树控件：纯文字
+    m_treeCtrl = new wxTreeCtrl(
+        treePanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+        wxTR_HAS_BUTTONS | wxTR_LINES_AT_ROOT | wxTR_SINGLE
+    );
 
-    m_treeCtrl = new wxTreeCtrl(treePanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-        wxTR_HAS_BUTTONS | wxTR_LINES_AT_ROOT | wxTR_SINGLE);
-    wxTreeItemId root = m_treeCtrl->AddRoot("Gates", 0);
-    for (size_t i = 0; i < gateNames.size(); ++i) {
-        m_treeCtrl->AppendItem(root, gateNames[i], static_cast<int>(i + 1));
-    }
-    m_treeCtrl->AssignImageList(imgList);
-    m_treeCtrl->Expand(root);
+    // 根节点（可见根更直观）
+    wxTreeItemId root = m_treeCtrl->AddRoot("资源");
 
+    // 01 基础逻辑门
+    wxTreeItemId catBasic = m_treeCtrl->AppendItem(root, "01 基础逻辑门");
+    m_treeCtrl->AppendItem(catBasic, "与门");   // AND
+    m_treeCtrl->AppendItem(catBasic, "非门");   // NOT
+    m_treeCtrl->AppendItem(catBasic, "或门");   // OR
+
+    // 02 复合逻辑门
+    wxTreeItemId catCombo = m_treeCtrl->AppendItem(root, "02 复合逻辑门");
+    m_treeCtrl->AppendItem(catCombo, "与非门"); // NAND
+
+    // 03 结点（目前没有，预留空分类）
+    wxTreeItemId catNodes = m_treeCtrl->AppendItem(root, "03 结点");
+    m_treeCtrl->AppendItem(catNodes, "普通结点");
+    m_treeCtrl->AppendItem(catNodes, "起始节点");
+    m_treeCtrl->AppendItem(catNodes, "终止节点");
+
+    // 04 扩展元器件（先放两个占位/示例）
+    wxTreeItemId catExt = m_treeCtrl->AppendItem(root, "04 扩展元器件");
+    m_treeCtrl->AppendItem(catExt, "3-8译码器");
+    m_treeCtrl->AppendItem(catExt, "2-4译码器");
+
+    // 全部展开
+    m_treeCtrl->ExpandAll();
+
+    // 加入布局
     treeSizer->Add(m_treeCtrl, 1, wxEXPAND | wxALL, 2);
     treePanel->SetSizer(treeSizer);
 
@@ -180,15 +201,48 @@ void cMain::OnToolSelected(wxCommandEvent& evt)
 
 void cMain::SetSelectedGate(const wxString& label)
 {
-    if (label == "Gates") {
+    // 分类节点：不选择
+    static const wxArrayString kCategories = {
+        "资源", "01 基础逻辑门", "02 复合逻辑门", "03 结点", "04 扩展元器件"
+    };
+    if (kCategories.Index(label) != wxNOT_FOUND) {
         selectedGateName.Clear();
-        SetStatusText("这是分类节点，不是元件。");
+        SetStatusText("这是分类节点。");
         return;
     }
-    selectedGateName = label;
+
+    // 中文 → 内部元件名 映射
+    // 只把已经实现的门映射到 AND/OR/NOT/NAND
+    wxString internal;
+    if (label == "与门")   internal = "AND";
+    else if (label == "或门")   internal = "OR";
+    else if (label == "非门")   internal = "NOT";
+    else if (label == "与非门") internal = "NAND";
+    else if (label == "普通结点") internal = "NODE";
+    else if (label == "起始节点") internal = "START_NODE";
+    else if (label == "终止节点") internal = "END_NODE";
+    // 扩展与结点（当前未实现）
+    else if (label == "3-8译码器" || label == "2-4译码器") {
+        selectedGateName.Clear();
+        drawBoard->pSelectedGateName->Clear();
+        SetStatusText(label + "：暂未实现，后续补上。");
+        return;
+    }
+    else {
+        // 其他未知项
+        selectedGateName.Clear();
+        drawBoard->pSelectedGateName->Clear();
+        SetStatusText("未知条目：" + label);
+        return;
+    }
+
+    // 设置选择并提示到状态栏
+    selectedGateName = internal;                // 例如 "AND"
+    *drawBoard->pSelectedGateName = internal;   // 供画布插入模式使用
     m_toolBar->ToggleTool(ID_TOOL_ARROW, false);
-    SetStatusText("已选择元件: " + label + "，请在画布点击放置。");
+    SetStatusText("已选择元件：" + label + "（" + internal + "），请在画布点击放置。");
 }
+
 
 void cMain::OnTreeItemActivated(wxTreeEvent& event)
 {

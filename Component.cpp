@@ -384,3 +384,150 @@ std::vector<wxPoint> XORGate::GetPins() const {
     };
 }
 
+// ===================== Nodes =====================
+
+static inline int sqr(int v) { return v * v; }
+
+// ------ 普通结点：实心小圆点 ------
+void NodeDot::drawSelf(wxMemoryDC& memDC) {
+    wxGraphicsContext* gc = wxGraphicsContext::Create(memDC);
+    if (!gc) return;
+    const double r = 5.0 * scale;
+
+    gc->SetPen(wxPen(wxColour(0, 0, 0), 2));
+    gc->SetBrush(*wxBLACK_BRUSH);
+    gc->DrawEllipse(m_center.x - r, m_center.y - r, 2 * r, 2 * r);
+
+    // 选中定位点（沿用四点小圈）
+    if (m_isSelected) {
+        gc->SetPen(wxPen(wxColour(128, 128, 128), 2));
+        for (int j = 0; j < 4; j++)
+            gc->DrawEllipse(m_BoundaryPoints[j].x - 4, m_BoundaryPoints[j].y - 4, 8, 8);
+    }
+    delete gc;
+}
+
+bool NodeDot::Isinside(const wxPoint& p) const {
+    const int R = int(7 * scale);
+    return sqr(p.x - m_center.x) + sqr(p.y - m_center.y) <= R * R;
+}
+
+void NodeDot::UpdateGeometry() {
+    const int b = int(10 * scale);
+    m_BoundaryPoints[0] = wxPoint(m_center.x - b, m_center.y - b);
+    m_BoundaryPoints[1] = wxPoint(m_center.x - b, m_center.y + b);
+    m_BoundaryPoints[2] = wxPoint(m_center.x + b, m_center.y - b);
+    m_BoundaryPoints[3] = wxPoint(m_center.x + b, m_center.y + b);
+}
+
+std::vector<wxPoint> NodeDot::GetPins() const {
+    // 允许多线汇聚：把中心点当成公共端
+    return { m_center };
+}
+
+// ------ 起始节点：方框里一个实心圆，连线接在方框右边 ------
+void StartNode::drawSelf(wxMemoryDC& memDC) {
+    wxGraphicsContext* gc = wxGraphicsContext::Create(memDC);
+    if (!gc) return;
+
+    // 尺寸
+    const double halfW = 10.0 * scale;   // 方框半宽（更小更像示意图）
+    const double halfH = 10.0 * scale;   // 方框半高
+    const double rBox = 2.5 * scale;   // 方框圆角
+    const double rDot = 5.0 * scale;   // 内圆半径
+
+    // 1) 方框
+    gc->SetPen(wxPen(wxColour(0, 0, 0), 2));
+    gc->SetBrush(*wxWHITE_BRUSH);
+#if wxCHECK_VERSION(3,1,0)
+    gc->DrawRoundedRectangle(m_center.x - halfW, m_center.y - halfH,
+        2 * halfW, 2 * halfH, rBox);
+#else
+    wxGraphicsPath rectPath = gc->CreatePath();
+    rectPath.AddRectangle(m_center.x - halfW, m_center.y - halfH, 2 * halfW, 2 * halfH);
+    gc->StrokePath(rectPath);
+#endif
+
+    // 2) 内部实心圆（靠右放置，视觉上“跟着方框右边”）
+    const double dotCx = m_center.x + (halfW - rDot - 1.5 * scale);
+    const double dotCy = m_center.y;
+    gc->SetBrush(*wxBLACK_BRUSH);          // 颜色不做强制要求
+    gc->DrawEllipse(dotCx - rDot, dotCy - rDot, 2 * rDot, 2 * rDot);
+
+    // 不画外伸的引脚了——连线会直接接在方框右边界中心
+
+    // 3) 选中时四角定位点
+    if (m_isSelected) {
+        gc->SetPen(wxPen(wxColour(128, 128, 128), 2));
+        for (int j = 0; j < 4; ++j) {
+            gc->DrawEllipse(m_BoundaryPoints[j].x - 4, m_BoundaryPoints[j].y - 4, 8, 8);
+        }
+    }
+
+    delete gc;
+}
+
+bool StartNode::Isinside(const wxPoint& p) const {
+    // 命中判定：按方框边界
+    const int left = m_BoundaryPoints[0].x;
+    const int top = m_BoundaryPoints[0].y;
+    const int right = m_BoundaryPoints[2].x;
+    const int bottom = m_BoundaryPoints[1].y;
+    return (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom);
+}
+
+void StartNode::UpdateGeometry() {
+    // 与 drawSelf 中的 halfW/halfH 保持一致
+    const int halfW = int(10.0 * scale);
+    const int halfH = int(10.0 * scale);
+
+    m_BoundaryPoints[0] = wxPoint(m_center.x - halfW, m_center.y - halfH); // 左上
+    m_BoundaryPoints[1] = wxPoint(m_center.x - halfW, m_center.y + halfH); // 左下
+    m_BoundaryPoints[2] = wxPoint(m_center.x + halfW, m_center.y - halfH); // 右上
+    m_BoundaryPoints[3] = wxPoint(m_center.x + halfW, m_center.y + halfH); // 右下
+}
+
+std::vector<wxPoint> StartNode::GetPins() const {
+    // 连接点：方框右边界的中心（不外伸）
+    const int halfW = int(10.0 * scale);
+    return { wxPoint(m_center.x + halfW, m_center.y) };
+}
+
+// ------ 终止节点：空心圆（信号终点，只连入） ------
+void EndNode::drawSelf(wxMemoryDC& memDC) {
+    wxGraphicsContext* gc = wxGraphicsContext::Create(memDC);
+    if (!gc) return;
+
+    const double r = 8.0 * scale;
+    gc->SetPen(wxPen(wxColour(0, 0, 0), 2));
+    gc->SetBrush(*wxWHITE_BRUSH);
+    gc->DrawEllipse(m_center.x - r, m_center.y - r, 2 * r, 2 * r);
+
+    // 内圈（更像终端标记）
+    gc->DrawEllipse(m_center.x - r / 2, m_center.y - r / 2, r, r);
+
+    if (m_isSelected) {
+        gc->SetPen(wxPen(wxColour(128, 128, 128), 2));
+        for (int j = 0; j < 4; j++)
+            gc->DrawEllipse(m_BoundaryPoints[j].x - 4, m_BoundaryPoints[j].y - 4, 8, 8);
+    }
+    delete gc;
+}
+
+bool EndNode::Isinside(const wxPoint& p) const {
+    const int R = int(10 * scale);
+    return sqr(p.x - m_center.x) + sqr(p.y - m_center.y) <= R * R;
+}
+
+void EndNode::UpdateGeometry() {
+    const int b = int(12 * scale);
+    m_BoundaryPoints[0] = wxPoint(m_center.x - b, m_center.y - b);
+    m_BoundaryPoints[1] = wxPoint(m_center.x - b, m_center.y + b);
+    m_BoundaryPoints[2] = wxPoint(m_center.x + b, m_center.y - b);
+    m_BoundaryPoints[3] = wxPoint(m_center.x + b, m_center.y + b);
+}
+
+std::vector<wxPoint> EndNode::GetPins() const {
+    // 连接点放在圆心略左
+    return { wxPoint(m_center.x - int(8 * scale), m_center.y) };
+}

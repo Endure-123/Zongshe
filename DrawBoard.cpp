@@ -493,6 +493,11 @@ ComponentType DrawBoard::NameToType(const wxString& s)
     if (u.Contains("OR"))   return ORGATE;
     if (u.Contains("AND"))  return ANDGATE;
 
+    // 结点
+    if (u.Contains("START_NODE") || u.Contains("STARTNODE") || u.Contains("起始")) return NODE_START;
+    if (u.Contains("END_NODE") || u.Contains("ENDNODE") || u.Contains("终止")) return NODE_END;
+    if (u.Contains("NODE"))  return NODE_BASIC;
+
     return ANDGATE; // 兜底
 }
 
@@ -506,6 +511,9 @@ const char* DrawBoard::TypeToName(ComponentType t)
     case NANDGATE: return "NAND";
     case NORGATE:  return "NOR";
     case XORGATE:  return "XOR";
+    case NODE_BASIC: return "NODE";
+    case NODE_START: return "START_NODE";
+    case NODE_END:   return "END_NODE";
     default:       return "AND";
     }
 }
@@ -519,6 +527,9 @@ std::unique_ptr<Component> DrawBoard::MakeComponent(ComponentType t, const wxPoi
     case NANDGATE: return std::make_unique<NANDGate>(center);
     case NORGATE:  return std::make_unique<NORGate>(center);
     case XORGATE:  return std::make_unique<XORGate>(center);
+    case NODE_BASIC: return std::make_unique<NodeDot>(center);
+    case NODE_START: return std::make_unique<StartNode>(center);
+    case NODE_END:   return std::make_unique<EndNode>(center);
     default:       return nullptr;
     }
 }
