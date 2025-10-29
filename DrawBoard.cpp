@@ -1,6 +1,7 @@
 ﻿#include "DrawBoard.h"
 #include <fstream>
-#include "SelectionEvents.h"  // ★ 新增：选择事件头
+#include "SelectionEvents.h"
+#include "EditCommands.h"
 
 // 选中锚点配色
 const wxColour DrawBoard::HANDLE_FILL_RGB(255, 255, 255);
@@ -19,17 +20,6 @@ DrawBoard::DrawBoard(wxWindow* parent) : wxPanel(parent)
 
     st1 = new wxStaticText(this, -1, wxT(""), wxPoint(10, 10));
     st2 = new wxStaticText(this, -1, wxT(""), wxPoint(10, 30));
-
-    m_isDragging = false;
-    m_draggingIndex = -1;
-
-    isDrawingLine = false;
-    isInsertingText = false;
-    isDrawing = false;
-
-    // 统一选择状态初始化
-    m_selKind = SelKind::None;
-    m_selId = -1;
 }
 
 DrawBoard::~DrawBoard() {}
@@ -51,16 +41,16 @@ void DrawBoard::OnPaint(wxPaintEvent& event)
         // 背景网格
         drawGrid(gc);
 
-        // ====== A) 已保存的线（从 lines → wires 的折线绘制）======
+        // ====== A) 已保存的线（折线绘制）======
         gc->SetPen(wxPen(wxColour(0, 0, 0), 2));
-        for (const auto& poly : wires) {                 // ★ 用 wires
+        for (const auto& poly : wires) {
             for (size_t i = 1; i < poly.size(); ++i) {
                 gc->StrokeLine(poly[i - 1].x, poly[i - 1].y,
                     poly[i].x, poly[i].y);
             }
         }
 
-        // ====== A1) 如果有选中的连线，绘制两端两点定位 ======
+        // ====== A1) 被选中的连线：两端定位点 ======
         if (selectedWireIndex >= 0 && selectedWireIndex < (int)wires.size()) {
             const auto& poly = wires[selectedWireIndex];
             if (poly.size() >= 2) {
@@ -69,24 +59,19 @@ void DrawBoard::OnPaint(wxPaintEvent& event)
 
                 gc->SetPen(wxPen(wxColour(128, 128, 128), 2));
                 gc->SetBrush(*wxWHITE_BRUSH);
-                const int r = 5; // 半径
+                const int r = 5;
                 gc->DrawEllipse(p0.x - r, p0.y - r, 2 * r, 2 * r);
                 gc->DrawEllipse(p1.x - r, p1.y - r, 2 * r, 2 * r);
             }
         }
 
-        // ====== B) 临时预览线（曼哈顿折线 + 吸附）======
-        if (isRouting) {                                 // ★ 用 isRouting
-            wxPoint hover = mousePos;
-            wxPoint snapEnd;
-            if (FindNearestPin(mousePos, snapEnd, nullptr)) {
-                hover = snapEnd;                        // 终点吸附到最近引脚
-            }
-            else {
-                hover = SnapToGrid(mousePos);           // 可选：吸到网格
-            }
+        // ====== B) 预览线（正在布线）======
+        if (isRouting) {
+            wxPoint hover = mousePos, snapEnd;
+            if (FindNearestPin(mousePos, snapEnd, nullptr)) hover = snapEnd;
+            else hover = SnapToGrid(mousePos);
 
-            auto preview = MakeManhattan(lineStart, hover); // 生成 L 形折线
+            auto preview = MakeManhattan(lineStart, hover);
             gc->SetPen(wxPen(wxColour(0, 0, 255), 2, wxPENSTYLE_DOT));
             for (size_t i = 1; i < preview.size(); ++i) {
                 gc->StrokeLine(preview[i - 1].x, preview[i - 1].y,
@@ -102,7 +87,7 @@ void DrawBoard::OnPaint(wxPaintEvent& event)
 
         // ⭐ 矢量门绘制
         for (int i = 0; i < (int)components.size(); ++i) {
-            components[i]->SetSelected(i == selectedGateIndex); // 让门自行绘制四点定位
+            components[i]->SetSelected(i == selectedGateIndex);
             components[i]->drawSelf(memDC);
         }
 
@@ -113,16 +98,14 @@ void DrawBoard::OnPaint(wxPaintEvent& event)
 
         delete gc;
     }
-
     dc.Blit(0, 0, GetClientSize().GetWidth(), GetClientSize().GetHeight(), &memDC, 0, 0);
 }
-
 
 void DrawBoard::drawGrid(wxGraphicsContext* gc)
 {
     wxSize size = GetClientSize();
     gc->SetPen(wxPen(wxColour(200, 200, 200), 1, wxPENSTYLE_DOT_DASH));
-    int gridSize = 20;
+    int gridSize = GRID;
     for (int x = 0; x < size.GetWidth(); x += gridSize)  gc->StrokeLine(x, 0, x, size.GetHeight());
     for (int y = 0; y < size.GetHeight(); y += gridSize) gc->StrokeLine(0, y, size.GetWidth(), y);
 }
@@ -130,35 +113,35 @@ void DrawBoard::drawGrid(wxGraphicsContext* gc)
 void DrawBoard::OnButtonMove(wxMouseEvent& event)
 {
     mousePos = event.GetPosition();
-    st1->SetLabel(wxString::Format("x: %d", event.GetX()));
-    st2->SetLabel(wxString::Format("y: %d", event.GetY()));
+    if (st1) st1->SetLabel(wxString::Format("x: %d", event.GetX()));
+    if (st2) st2->SetLabel(wxString::Format("y: %d", event.GetY()));
 
     if (isDrawing) currentEnd = mousePos;
 
-    // 拖动组件
+    // 拖动组件（实时预览；真正的命令在 MouseUp 记录 from->to）
     if (m_isDragging && m_draggingIndex >= 0 && m_draggingIndex < (int)components.size()) {
         const wxPoint delta = mousePos - m_dragStartMouse;
         wxPoint target = m_dragStartCenter + delta;
-        wxPoint snapped = SnapToStep(target);                       // 半格吸附
+        wxPoint snapped = SnapToStep(target);
         if (snapped != components[m_draggingIndex]->GetCenter()) {
             components[m_draggingIndex]->SetCenter(snapped);
-            RerouteWiresForMovedComponent(m_draggingIndex);         // 线端点跟随并重算
+            RerouteWiresForMovedComponent(m_draggingIndex, preMovePins);
+            preMovePins = components[m_draggingIndex]->GetPins();
             Refresh(false);
         }
         return;
-
     }
-    Refresh();
+    Refresh(false);
 }
 
 void DrawBoard::OnLeftDown(wxMouseEvent& event)
 {
     wxPoint pos = event.GetPosition();
 
-    // 插入模式：由外部设置 pSelectedGateName（如按钮）决定要插哪个门
+    // 插入模式：由外部设置 pSelectedGateName 决定要插哪个门
     if (pSelectedGateName && !pSelectedGateName->IsEmpty()) {
-        AddGate(pos, *pSelectedGateName);
-        Refresh();
+        AddGate(pos, *pSelectedGateName);   // 内部走命令
+        Refresh(false);
         return;
     }
 
@@ -171,12 +154,10 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
             m_isDragging = true;
             m_dragStartMouse = pos;
             m_dragStartCenter = components[hit]->GetCenter();
-            // 记录移动前引脚坐标
             preMovePins = components[hit]->GetPins();
             if (!HasCapture()) CaptureMouse();
-            Refresh();
+            Refresh(false);
 
-            // ★ 选中 Gate 并通知
             m_selKind = SelKind::Gate;
             m_selId = selectedGateIndex;
             NotifySelectionChanged();
@@ -186,7 +167,7 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
             m_draggingIndex = -1;
             m_isDragging = false;
 
-            // ★ 试图命中线条
+            // 命中线
             int w = HitTestWire(pos);
             if (w >= 0) {
                 selectedWireIndex = w;
@@ -198,29 +179,20 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
                 m_selKind = SelKind::None;
                 m_selId = -1;
             }
-            Refresh();
+            Refresh(false);
             NotifySelectionChanged();
         }
     }
 
     // 画线
     if (currentTool == ID_TOOL_HAND) {
-        // 开始画线
-        wxPoint pos = event.GetPosition();
-
-        // 1) 优先吸附到引脚
+        // 开始画线：优先吸附到引脚
         wxPoint snap;
-        if (FindNearestPin(pos, snap, nullptr)) {
-            lineStart = snap;
-        }
-        else {
-            // 2) 吸附网格（可选）
-            lineStart = SnapToGrid(pos);
-        }
+        if (FindNearestPin(pos, snap, nullptr)) lineStart = snap;
+        else                                    lineStart = SnapToGrid(pos);
         isRouting = true;
         return;
     }
-
 
     // 文本
     if (currentTool == ID_TOOL_TEXT && isInsertingText) {
@@ -229,7 +201,7 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
             wxString input = dlg.GetValue();
             if (!input.IsEmpty()) {
                 texts.emplace_back(pos, input);
-                Refresh();
+                Refresh(false);
             }
         }
     }
@@ -237,83 +209,112 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
 
 void DrawBoard::OnLeftUp(wxMouseEvent& event)
 {
+    // 结束拖动 → 生成移动命令
     if (m_isDragging) {
         m_isDragging = false;
+        int idx = m_draggingIndex;
         m_draggingIndex = -1;
         if (HasCapture()) ReleaseMouse();
+
+        if (idx >= 0 && idx < (int)components.size()) {
+            wxPoint from = m_dragStartCenter;
+            wxPoint to = components[idx]->GetCenter();
+            if (from != to && m_cmd) {
+                m_cmd->Execute(std::make_unique<MoveGateCmd>(this, idx, from, to));
+            }
+        }
         preMovePins.clear();
-        Refresh();
+        Refresh(false);
     }
 
+    // 旧直线逻辑（保持兼容）
     if (isDrawingLine && isDrawing) {
         currentEnd = event.GetPosition();
         lines.emplace_back(std::make_pair(currentStart, currentEnd));
         isDrawing = false;
-        Refresh();
+        Refresh(false);
     }
 
+    // 结束布线 → 生成添加连线命令
     if (isRouting) {
         wxPoint pos = event.GetPosition();
         wxPoint endPt;
-        if (!FindNearestPin(pos, endPt, nullptr)) {
-            endPt = SnapToGrid(pos); // 可选
-        }
+        if (!FindNearestPin(pos, endPt, nullptr)) endPt = SnapToGrid(pos);
 
         auto poly = MakeManhattan(lineStart, endPt);
-
-        // 避免“起点=终点”或重复点导致 0 长度线段
         if (poly.size() >= 2 && !(poly.front() == poly.back())) {
-            wires.push_back(std::move(poly));
-        }
-        isRouting = false;
-        Refresh();
-
-        // ★ 画完线后默认选中新线并通知
-        if (!wires.empty()) {
-            selectedWireIndex = (int)wires.size() - 1;
+            WireSnapshot w{ poly };
+            if (m_cmd) {
+                m_cmd->Execute(std::make_unique<AddWireCmd>(this, w));
+                selectedWireIndex = (int)wires.size() - 1;
+            }
+            else {
+                AddWire(w);
+                selectedWireIndex = (int)wires.size() - 1;
+            }
             m_selKind = SelKind::Wire;
             m_selId = selectedWireIndex;
             NotifySelectionChanged();
         }
+        isRouting = false;
+        Refresh(false);
         return;
     }
 }
 
 // ============ 对外接口 ============
-void DrawBoard::ClearTexts() { texts.clear(); Refresh(); }
-void DrawBoard::ClearPics() { lines.clear(); Refresh(); }
+void DrawBoard::ClearTexts() { texts.clear(); Refresh(false); }
+void DrawBoard::ClearPics() { lines.clear(); Refresh(false); }
 
 void DrawBoard::AddGate(const wxPoint& center, const wxString& typeName)
 {
-    ComponentType t = NameToType(typeName);
-    auto comp = MakeComponent(t, SnapToStep(center));
-    if (comp) {
-        components.push_back(std::move(comp));
-        Refresh();
+    GateSnapshot snap{ NameToType(typeName), SnapToStep(center), 1.0 };
+    if (m_cmd) {
+        m_cmd->Execute(std::make_unique<AddGateCmd>(this, snap));
     }
     else {
-        wxMessageBox("未知的元件类型：" + typeName, "错误", wxOK | wxICON_ERROR);
+        AddGateFromSnapshot(snap);
     }
+    Refresh(false);
 }
 
 void DrawBoard::SelectGate(const wxPoint& pos)
 {
     selectedGateIndex = HitTestGate(pos);
-    Refresh();
+    Refresh(false);
 }
 
 void DrawBoard::DeleteSelectedGate()
 {
     if (selectedGateIndex >= 0 && selectedGateIndex < (int)components.size()) {
-        components.erase(components.begin() + selectedGateIndex);
-        selectedGateIndex = -1;
-        Refresh();
+        if (m_cmd) m_cmd->Execute(std::make_unique<DeleteGateCmd>(this, selectedGateIndex));
+        else       DeleteGateByIndex(selectedGateIndex);
 
-        // ★ 清空统一选择并通知
+        selectedGateIndex = -1;
         m_selKind = SelKind::None;
         m_selId = -1;
         NotifySelectionChanged();
+        Refresh(false);
     }
+}
+
+void DrawBoard::DeleteSelectedWire() {
+    if (selectedWireIndex >= 0 && selectedWireIndex < (int)wires.size()) {
+        if (m_cmd) m_cmd->Execute(std::make_unique<DeleteWireCmd>(this, selectedWireIndex));
+        else       DeleteWireByIndex(selectedWireIndex);
+
+        selectedWireIndex = -1;
+        m_selKind = SelKind::None;
+        m_selId = -1;
+        NotifySelectionChanged();
+        Refresh(false);
+    }
+}
+
+void DrawBoard::DeleteSelection() {
+    if (selectedGateIndex >= 0) { DeleteSelectedGate(); return; }
+    if (selectedWireIndex >= 0) { DeleteSelectedWire(); return; }
+    // 什么也没选中就不做事
 }
 
 int DrawBoard::HitTestGate(const wxPoint& pt) const
@@ -329,10 +330,9 @@ void DrawBoard::SaveToJson(const std::string& filename)
 {
     Json::Value root;
 
-    // ====== 1) 连线（折线）：wires ======
-    // 格式： "wires": [ [ {"x":..,"y":..}, {"x":..,"y":..}, ... ],  ... ]
+    // 1) wires（折线）
     for (const auto& poly : wires) {
-        if (poly.size() < 2) continue; // 忽略无效折线
+        if (poly.size() < 2) continue;
         Json::Value arr(Json::arrayValue);
         for (const auto& p : poly) {
             Json::Value node;
@@ -343,7 +343,7 @@ void DrawBoard::SaveToJson(const std::string& filename)
         root["wires"].append(arr);
     }
 
-    // ====== 2) 兼容旧直线（可选）：如仍在用 lines，则也序列化到 oldShapes，便于调试/过渡 ======
+    // 2) 兼容旧直线
     if (!lines.empty()) {
         for (auto& line : lines) {
             Json::Value obj;
@@ -356,7 +356,7 @@ void DrawBoard::SaveToJson(const std::string& filename)
         }
     }
 
-    // ====== 3) 文本 ======
+    // 3) 文本
     for (auto& txt : texts) {
         Json::Value obj;
         obj["content"] = std::string(txt.second.mb_str());
@@ -365,7 +365,7 @@ void DrawBoard::SaveToJson(const std::string& filename)
         root["texts"].append(obj);
     }
 
-    // ====== 4) 门元件 ======
+    // 4) 门
     for (auto& c : components) {
         Json::Value obj;
         obj["name"] = TypeToName(c->m_type);
@@ -382,7 +382,6 @@ void DrawBoard::SaveToJson(const std::string& filename)
     writer->write(root, &ofs);
 }
 
-
 void DrawBoard::LoadFromJson(const std::string& filename)
 {
     std::ifstream ifs(filename);
@@ -394,12 +393,9 @@ void DrawBoard::LoadFromJson(const std::string& filename)
     ifs >> root;
 
     // 清空
-    wires.clear();
-    lines.clear();
-    texts.clear();
-    components.clear();
+    wires.clear(); lines.clear(); texts.clear(); components.clear();
 
-    // ====== 1) 先尝试读取新格式：wires（折线）======
+    // 1) wires（折线）
     if (root.isMember("wires") && root["wires"].isArray()) {
         for (const auto& arr : root["wires"]) {
             if (!arr.isArray() || arr.size() < 2) continue;
@@ -414,37 +410,31 @@ void DrawBoard::LoadFromJson(const std::string& filename)
         }
     }
 
-    // ====== 2) 兼容旧数据：shapes（x1,y1,x2,y2 直线）======
-    // 若文件中仍存在旧的 shapes，就把它们转成两点的折线追加到 wires
+    // 2) 兼容旧数据：shapes 直线
     if (root.isMember("shapes") && root["shapes"].isArray()) {
         for (const auto& obj : root["shapes"]) {
-            // 只认旧的 "Line" 类型
             if (!obj.isObject()) continue;
             if (obj.isMember("type") && std::string(obj["type"].asCString()) == "Line") {
                 wxPoint p1(obj["x1"].asInt(), obj["y1"].asInt());
                 wxPoint p2(obj["x2"].asInt(), obj["y2"].asInt());
-                if (!(p1 == p2)) {
-                    wires.push_back({ p1, p2 });
-                }
+                if (!(p1 == p2)) wires.push_back({ p1, p2 });
             }
         }
     }
 
-    // （可选）兼容我们在 SaveToJson 中额外写的 oldShapes
+    // 兼容 oldShapes
     if (root.isMember("oldShapes") && root["oldShapes"].isArray()) {
         for (const auto& obj : root["oldShapes"]) {
             if (!obj.isObject()) continue;
             if (obj.isMember("type") && std::string(obj["type"].asCString()) == "Line") {
                 wxPoint p1(obj["x1"].asInt(), obj["y1"].asInt());
                 wxPoint p2(obj["x2"].asInt(), obj["y2"].asInt());
-                if (!(p1 == p2)) {
-                    wires.push_back({ p1, p2 });
-                }
+                if (!(p1 == p2)) wires.push_back({ p1, p2 });
             }
         }
     }
 
-    // ====== 3) 文本 ======
+    // 3) 文本
     if (root.isMember("texts") && root["texts"].isArray()) {
         for (auto& obj : root["texts"]) {
             wxPoint p(obj.get("x", 0).asInt(), obj.get("y", 0).asInt());
@@ -453,7 +443,7 @@ void DrawBoard::LoadFromJson(const std::string& filename)
         }
     }
 
-    // ====== 4) 门 ======
+    // 4) 门
     if (root.isMember("gates") && root["gates"].isArray()) {
         for (auto& obj : root["gates"]) {
             wxPoint center(obj.get("x", 0).asInt(), obj.get("y", 0).asInt());
@@ -467,9 +457,8 @@ void DrawBoard::LoadFromJson(const std::string& filename)
         }
     }
 
-    Refresh();
+    Refresh(false);
 }
-
 
 // ============ 小工具 ============
 std::array<wxPoint, 4> DrawBoard::GetGateAnchorPoints(const Component* comp) const
@@ -483,12 +472,12 @@ ComponentType DrawBoard::NameToType(const wxString& s)
 {
     wxString u = s.Upper().Trim(true).Trim(false);
 
-    // 先匹配更具体的（避免 "NAND" 被 "AND" 抢先匹配）
+    // 先匹配更具体的
     if (u.Contains("NAND")) return NANDGATE;
     if (u.Contains("NOR"))  return NORGATE;
     if (u.Contains("XOR"))  return XORGATE;
 
-    // 再匹配基本门
+    // 基本门
     if (u.Contains("NOT"))  return NOTGATE;
     if (u.Contains("OR"))   return ORGATE;
     if (u.Contains("AND"))  return ANDGATE;
@@ -501,36 +490,35 @@ ComponentType DrawBoard::NameToType(const wxString& s)
     return ANDGATE; // 兜底
 }
 
-
 const char* DrawBoard::TypeToName(ComponentType t)
 {
     switch (t) {
-    case ANDGATE:  return "AND";
-    case ORGATE:   return "OR";
-    case NOTGATE:  return "NOT";
-    case NANDGATE: return "NAND";
-    case NORGATE:  return "NOR";
-    case XORGATE:  return "XOR";
-    case NODE_BASIC: return "NODE";
-    case NODE_START: return "START_NODE";
-    case NODE_END:   return "END_NODE";
-    default:       return "AND";
+    case ANDGATE:     return "AND";
+    case ORGATE:      return "OR";
+    case NOTGATE:     return "NOT";
+    case NANDGATE:    return "NAND";
+    case NORGATE:     return "NOR";
+    case XORGATE:     return "XOR";
+    case NODE_BASIC:  return "NODE";
+    case NODE_START:  return "START_NODE";
+    case NODE_END:    return "END_NODE";
+    default:          return "AND";
     }
 }
 
 std::unique_ptr<Component> DrawBoard::MakeComponent(ComponentType t, const wxPoint& center)
 {
     switch (t) {
-    case ANDGATE:  return std::make_unique<ANDGate>(center);
-    case ORGATE:   return std::make_unique<ORGate>(center);
-    case NOTGATE:  return std::make_unique<NOTGate>(center);
-    case NANDGATE: return std::make_unique<NANDGate>(center);
-    case NORGATE:  return std::make_unique<NORGate>(center);
-    case XORGATE:  return std::make_unique<XORGate>(center);
-    case NODE_BASIC: return std::make_unique<NodeDot>(center);
-    case NODE_START: return std::make_unique<StartNode>(center);
-    case NODE_END:   return std::make_unique<EndNode>(center);
-    default:       return nullptr;
+    case ANDGATE:     return std::make_unique<ANDGate>(center);
+    case ORGATE:      return std::make_unique<ORGate>(center);
+    case NOTGATE:     return std::make_unique<NOTGate>(center);
+    case NANDGATE:    return std::make_unique<NANDGate>(center);
+    case NORGATE:     return std::make_unique<NORGate>(center);
+    case XORGATE:     return std::make_unique<XORGate>(center);
+    case NODE_BASIC:  return std::make_unique<NodeDot>(center);
+    case NODE_START:  return std::make_unique<StartNode>(center);
+    case NODE_END:    return std::make_unique<EndNode>(center);
+    default:          return nullptr;
     }
 }
 
@@ -563,137 +551,83 @@ bool DrawBoard::FindNearestPin(const wxPoint& p, wxPoint& out, int* compIdx) con
 
 std::vector<wxPoint> DrawBoard::MakeManhattan(const wxPoint& a, const wxPoint& b) const
 {
-    // 共线：水平或垂直，直接一段
-    if (a.x == b.x || a.y == b.y) {
-        return { a, b };
-    }
-
-    // 方案 A：先水平后垂直（a.x → b.x, a.y → b.y）
-    // 拐点1 = (b.x, a.y)
-    wxPoint bend(b.x, a.y);
+    if (a.x == b.x || a.y == b.y) return { a, b }; // 共线
+    wxPoint bend(b.x, a.y);                         // 先水平后垂直
     return { a, bend, b };
-
-    // 若想优先垂直后水平，就改成：
-    // wxPoint bend(a.x, b.y);
-    // return { a, bend, b };
 }
 
 wxPoint DrawBoard::SnapToGrid(const wxPoint& p) const
 {
-    auto roundTo = [](int v, int g) {
-        int r = (v + g / 2) / g;
-        return r * g;
-        };
+    auto roundTo = [](int v, int g) { int r = (v + g / 2) / g; return r * g; };
     return wxPoint(roundTo(p.x, GRID), roundTo(p.y, GRID));
 }
 
 wxPoint DrawBoard::SnapToStep(const wxPoint& p) const
 {
-    auto roundTo = [](int v, int step) {
-        int r = (v + step / 2) / step;
-        return r * step;
-        };
+    auto roundTo = [](int v, int step) { int r = (v + step / 2) / step; return r * step; };
     return wxPoint(roundTo(p.x, STEP), roundTo(p.y, STEP));
 }
 
-void DrawBoard::RerouteWiresForMovedComponent(int compIdx)
+void DrawBoard::RerouteWiresForMovedComponent(int compIdx, const std::vector<wxPoint>& prevPins)
 {
     if (compIdx < 0 || compIdx >= (int)components.size()) return;
 
-    // 移动后的引脚坐标
-    const auto newPins = components[compIdx]->GetPins();
+    // 新/旧引脚表
+    const std::vector<wxPoint> newPins = components[compIdx]->GetPins();
+    if (prevPins.empty() || newPins.empty()) return;
 
-    // 遍历所有折线：如果端点等于 preMovePins 的某个点，就替换为对应的新引脚
+    auto nearlyEqual = [](const wxPoint& a, const wxPoint& b) {
+        // 容忍 1 个像素以内的差异，避免栅格/吸附导致的非严格相等
+        return (std::abs(a.x - b.x) <= 1) && (std::abs(a.y - b.y) <= 1);
+        };
+
+    auto findPinByPoint = [&](const wxPoint& p)->int {
+        for (int i = 0; i < (int)prevPins.size(); ++i) {
+            if (nearlyEqual(prevPins[i], p)) return i;
+        }
+        return -1;
+        };
+
     for (auto& poly : wires) {
         if (poly.size() < 2) continue;
 
-        bool changed = false;
         wxPoint start = poly.front();
         wxPoint end = poly.back();
+        bool changed = false;
 
-        auto findPinIdx = [](const std::vector<wxPoint>& pins, const wxPoint& p) -> int {
-            for (int i = 0; i < (int)pins.size(); ++i) {
-                if (pins[i] == p) return i;
-            }
-            return -1;
-            };
+        int idxS = findPinByPoint(start);
+        int idxE = findPinByPoint(end);
 
-        int sIdx = findPinIdx(preMovePins, start);
-        int eIdx = findPinIdx(preMovePins, end);
-
-        if (sIdx >= 0) { start = newPins[sIdx]; changed = true; }
-        if (eIdx >= 0) { end = newPins[eIdx]; changed = true; }
+        if (idxS >= 0 && idxS < (int)newPins.size()) { start = newPins[idxS]; changed = true; }
+        if (idxE >= 0 && idxE < (int)newPins.size()) { end = newPins[idxE]; changed = true; }
 
         if (changed) {
-            // 重新生成 L 形折线，保持正交
             poly = MakeManhattan(start, end);
         }
     }
-
-    // 为连续拖动做准备
-    preMovePins = newPins;
-}
-
-void DrawBoard::DeleteSelectedWire() {
-    if (selectedWireIndex >= 0 && selectedWireIndex < (int)wires.size()) {
-        wires.erase(wires.begin() + selectedWireIndex);
-        selectedWireIndex = -1;
-        Refresh(false);
-
-        // ★ 清空统一选择并通知
-        m_selKind = SelKind::None;
-        m_selId = -1;
-        NotifySelectionChanged();
-    }
-}
-
-void DrawBoard::DeleteSelection() {
-    if (selectedGateIndex >= 0) {
-        DeleteSelectedGate();
-        return;
-    }
-    if (selectedWireIndex >= 0) {
-        DeleteSelectedWire();
-        return;
-    }
-    // 什么也没选中就不做事
 }
 
 int DrawBoard::Dist2_PointToSeg(const wxPoint& p, const wxPoint& a, const wxPoint& b)
 {
-    // 向量法：投影到 AB，夹在 [0,1] 区间内；返回平方距离避免开方
-    const int vx = b.x - a.x;
-    const int vy = b.y - a.y;
-    const int wx = p.x - a.x;
-    const int wy = p.y - a.y;
-
+    const int vx = b.x - a.x, vy = b.y - a.y;
+    const int wx = p.x - a.x, wy = p.y - a.y;
     const int vv = vx * vx + vy * vy;
-    if (vv == 0) { // 退化为点
-        const int dx = p.x - a.x;
-        const int dy = p.y - a.y;
-        return dx * dx + dy * dy;
-    }
-    // t = (w·v)/|v|^2
+    if (vv == 0) { int dx = p.x - a.x, dy = p.y - a.y; return dx * dx + dy * dy; }
     const double t = (wx * vx + wy * vy) / (double)vv;
     double clamped = t < 0 ? 0 : (t > 1 ? 1 : t);
-
     const double projx = a.x + clamped * vx;
     const double projy = a.y + clamped * vy;
-    const double dx = p.x - projx;
-    const double dy = p.y - projy;
+    const double dx = p.x - projx, dy = p.y - projy;
     return int(dx * dx + dy * dy);
 }
 
 int DrawBoard::HitTestWire(const wxPoint& pt) const
 {
-    const int th2 = LINE_HIT_PX * LINE_HIT_PX; // 命中阈值的平方
-    // 从上往下优先“最上层”（与门的命中逻辑一致，倒序遍历更像“后画的在上面”）
+    const int th2 = LINE_HIT_PX * LINE_HIT_PX;
     for (int i = (int)wires.size() - 1; i >= 0; --i) {
         const auto& poly = wires[i];
         for (size_t k = 1; k < poly.size(); ++k) {
-            if (Dist2_PointToSeg(pt, poly[k - 1], poly[k]) <= th2) {
-                return i;
-            }
+            if (Dist2_PointToSeg(pt, poly[k - 1], poly[k]) <= th2) return i;
         }
     }
     return -1;
@@ -736,4 +670,61 @@ void DrawBoard::SelectWireByIndex(int idx) {
         Refresh(false);
         NotifySelectionChanged();
     }
+}
+
+// ===== 命令层 API =====
+long DrawBoard::AddGateFromSnapshot(const GateSnapshot& s) {
+    auto comp = MakeComponent(s.type, SnapToStep(s.center));
+    if (!comp) return -1;
+    comp->scale = s.scale;
+    comp->UpdateGeometry();
+    components.push_back(std::move(comp));
+    Refresh(false);
+    return (long)components.size() - 1;
+}
+
+std::optional<GateSnapshot> DrawBoard::ExportGateByIndex(long id) const {
+    if (id < 0 || id >= (long)components.size()) return std::nullopt;
+    const auto& c = components[id];
+    GateSnapshot s;
+    s.type = c->m_type;
+    s.center = c->GetCenter();
+    s.scale = c->scale;
+    return s;
+}
+
+void DrawBoard::DeleteGateByIndex(long id) {
+    if (id < 0 || id >= (long)components.size()) return;
+    components.erase(components.begin() + id);
+    if (selectedGateIndex == id) selectedGateIndex = -1;
+    Refresh(false);
+}
+
+void DrawBoard::MoveGateTo(long id, const wxPoint& pos) {
+    if (id < 0 || id >= (long)components.size()) return;
+    // Capture pins BEFORE move
+    std::vector<wxPoint> prevPins = components[id]->GetPins();
+    components[id]->SetCenter(SnapToStep(pos));
+    // After move, reroute wires using prevPins -> new pins mapping
+    RerouteWiresForMovedComponent((int)id, prevPins);
+    Refresh(false);
+}
+
+long DrawBoard::AddWire(const WireSnapshot& w) {
+    if (w.poly.size() < 2) return -1;
+    wires.push_back(w.poly);
+    Refresh(false);
+    return (long)wires.size() - 1;
+}
+
+std::optional<WireSnapshot> DrawBoard::ExportWireByIndex(long id) const {
+    if (id < 0 || id >= (long)wires.size()) return std::nullopt;
+    return WireSnapshot{ wires[id] };
+}
+
+void DrawBoard::DeleteWireByIndex(long id) {
+    if (id < 0 || id >= (long)wires.size()) return;
+    wires.erase(wires.begin() + id);
+    if (selectedWireIndex == id) selectedWireIndex = -1;
+    Refresh(false);
 }

@@ -6,6 +6,7 @@
 #include <wx/aui/aui.h>      // AUI
 #include "DrawBoard.h"
 #include "AppConfig.h"
+#include "UndoRedo.h" 
 
 enum {
     ID_SaveJSON = wxID_HIGHEST + 100,
@@ -39,6 +40,8 @@ private:
     // 属性面板指针
     PropertyPane* m_prop = nullptr;
 
+    CommandManager m_cmdMgr;
+
     wxString selectedGateName;
 
     wxBitmap LoadToolBitmap(const wxString& filename, int size = 24);
@@ -51,6 +54,10 @@ private:
     void OnTreeItemActivated(wxTreeEvent& event);
     void OnTreeSelChanged(wxTreeEvent& event);
     void SetSelectedGate(const wxString& label);
+
+    void OnUndo(wxCommandEvent&);     
+    void OnRedo(wxCommandEvent&);     
+    void UpdateUndoRedoUI(bool canUndo, bool canRedo); 
 
     wxAuiManager m_mgr;
     wxSplitterWindow* m_leftSplitter = nullptr;

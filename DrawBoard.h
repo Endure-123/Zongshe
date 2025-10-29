@@ -5,13 +5,26 @@
 #include <vector>
 #include <memory>
 #include <array>
+#include <optional>
 #include <json/json.h>
 #include "AppConfig.h"
-#include "Component.h"   // ← 引入矢量门
-#include "SelectionEvents.h" // ← 自定义选择变化事件
+#include "Component.h"
+#include "SelectionEvents.h"
+#include "UndoRedo.h"
 
 // 统一选择类型（供属性面板查询）
 enum class SelKind { None = 0, Gate = 1, Wire = 2 };
+
+// —— 快照结构（用于 Undo/Redo）——
+struct GateSnapshot {
+    ComponentType type;
+    wxPoint center;
+    double scale{ 1.0 };
+};
+
+struct WireSnapshot {
+    std::vector<wxPoint> poly;
+};
 
 class DrawBoard : public wxPanel
 {
@@ -30,7 +43,8 @@ public:
 
     // 线/文本/鼠标
     wxPoint currentStart, currentEnd, mousePos;
-    bool isDrawingLine, isInsertingText, isDrawing;
+    bool isDrawingLine = false, isInsertingText = false, isDrawing = false;
+
     // 替换旧的直线容器：每根线是一条折线（点序列）
     std::vector<std::vector<wxPoint>> wires;
 
@@ -45,8 +59,8 @@ public:
     // ⭐ 组件集合：矢量门对象
     std::vector<std::unique_ptr<Component>> components;
 
-    wxStaticText* st1;
-    wxStaticText* st2;
+    wxStaticText* st1 = nullptr;
+    wxStaticText* st2 = nullptr;
 
     // 指向 cMain 的“当前选中元件类型名称”（例如 "AND", "OR", "NOT"...）
     wxString* pSelectedGateName = nullptr;
@@ -60,7 +74,7 @@ public:
     void SelectGateByIndex(int idx);
     void SelectWireByIndex(int idx);
 
-    // 对外功能
+    // ===== 对外功能（保持你的接口）=====
     void AddGate(const wxPoint& center, const wxString& typeName);
     void SelectGate(const wxPoint& pos);
     void DeleteSelectedGate();
@@ -83,6 +97,19 @@ public:
     static ComponentType NameToType(const wxString& s);
     static const char* TypeToName(ComponentType t);
 
+    // ===== 与命令管理器对接 =====
+    void SetCommandManager(CommandManager* m) { m_cmd = m; }
+
+    // —— 命令层需要的最小 API（被 ICommand 调用）——
+    long AddGateFromSnapshot(const GateSnapshot& s);                    // 返回 gate 索引
+    std::optional<GateSnapshot> ExportGateByIndex(long id) const;       // 导出 gate 快照
+    void DeleteGateByIndex(long id);                                     // 删除 gate
+    void MoveGateTo(long id, const wxPoint& pos);                        // 移动 gate
+
+    long AddWire(const WireSnapshot& w);                                 // 返回 wire 索引
+    std::optional<WireSnapshot> ExportWireByIndex(long id) const;        // 导出 wire 快照
+    void DeleteWireByIndex(long id);                                      // 删除 wire
+
 private:
     void OnPaint(wxPaintEvent& event);
     void OnButtonMove(wxMouseEvent& event);
@@ -95,10 +122,9 @@ private:
     // 该元件移动前的引脚坐标
     std::vector<wxPoint> preMovePins;
 
-    
     static std::unique_ptr<Component> MakeComponent(ComponentType t, const wxPoint& center);
 
-    // 选中锚点样式（如需要你也可以自己画四点；各门类也会在选中时自行画定位点）
+    // 选中锚点样式
     static const wxColour HANDLE_FILL_RGB;
     static const wxColour HANDLE_STROKE_RGB;
     static constexpr int  HANDLE_RADIUS_PX = 5;
@@ -107,21 +133,20 @@ private:
     // 找到最近引脚（返回是否命中），out 为吸附后的坐标
     bool FindNearestPin(const wxPoint& p, wxPoint& out, int* compIdx = nullptr) const;
 
-    // 生成 L 形曼哈顿路径（start→end），优先水平再垂直（或反之均可）
+    // 生成 L 形曼哈顿路径（start→end）
     std::vector<wxPoint> MakeManhattan(const wxPoint& a, const wxPoint& b) const;
 
-    // 可选：吸附到网格
+    // 吸附到网格/步进
     wxPoint SnapToGrid(const wxPoint& p) const;
-
     wxPoint SnapToStep(const wxPoint& p) const;      // 半格吸附
-    void RerouteWiresForMovedComponent(int compIdx); // 线跟随重算
+    void RerouteWiresForMovedComponent(int compIdx, const std::vector<wxPoint>& prevPins); // 线跟随重算（传入移动前引脚坐标）
 
     int selectedWireIndex = -1;          // 选中的连线（wires 数组下标）
 
     // 命中测试：点是否命中某条折线（返回下标；未命中返回 -1）
     int HitTestWire(const wxPoint& pt) const;
 
-    // 点到线段的平方距离（内部工具）
+    // 点到线段的平方距离
     static int Dist2_PointToSeg(const wxPoint& p, const wxPoint& a, const wxPoint& b);
 
     // 参数
@@ -132,10 +157,13 @@ private:
     // 线条命中阈值（像素）
     static constexpr int LINE_HIT_PX = 6;
 
-    // ★ 新增：统一选择类型与索引（供属性面板/外部查询）
+    // ★ 统一选择类型与索引（供属性面板/外部查询）
     SelKind m_selKind = SelKind::None;
     long    m_selId = -1;
 
-    // ★ 新增：向外发 EVT_SELECTION_CHANGED
+    // ★ 选择变化事件
     void NotifySelectionChanged();
+
+    // ★ 命令管理器
+    CommandManager* m_cmd = nullptr;
 };

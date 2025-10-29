@@ -8,5 +8,5 @@ enum ToolIDs {
     ID_TOOL_ARROW = wxID_HIGHEST + 1,
     ID_TOOL_TEXT,
     ID_TOOL_HAND,
-    ID_TOOL_DELETE   // 新增删除工具
+    ID_TOOL_DELETE   
 };

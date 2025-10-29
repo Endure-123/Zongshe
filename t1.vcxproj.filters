@@ -45,6 +45,12 @@
     <ClInclude Include="PropertyPane.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="UndoRedo.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="EditCommands.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ResourceManager.cpp">

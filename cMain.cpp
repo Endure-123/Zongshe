@@ -9,6 +9,8 @@
 
 wxBEGIN_EVENT_TABLE(cMain, wxFrame)
 EVT_MENU(wxID_EXIT, cMain::OnExit)
+EVT_MENU(wxID_UNDO, cMain::OnUndo)
+EVT_MENU(wxID_REDO, cMain::OnRedo)
 EVT_MENU(2001, cMain::OnClearTexts)
 EVT_MENU(2002, cMain::OnClearPics)
 wxEND_EVENT_TABLE()
@@ -33,6 +35,8 @@ cMain::cMain()
     editMenu = new wxMenu();
     editMenu->Append(2001, "Clear &Texts");
     editMenu->Append(2002, "Clear &Lines");
+    editMenu->Prepend(wxID_REDO, "重做\tCtrl+Y"); 
+    editMenu->Prepend(wxID_UNDO, "撤销\tCtrl+Z");
     menuBar->Append(editMenu, "&Edit");
 
     SetMenuBar(menuBar);
@@ -43,6 +47,8 @@ cMain::cMain()
     m_toolBar->AddRadioTool(ID_TOOL_TEXT, "Text", LoadToolBitmap("BigA"));
     m_toolBar->AddRadioTool(ID_TOOL_HAND, "Hand", LoadToolBitmap("hands"));
     m_toolBar->AddTool(ID_TOOL_DELETE, "Delete", LoadToolBitmap("delete"));
+    m_toolBar->AddTool(wxID_UNDO, "Undo", LoadToolBitmap("Undo"));
+    m_toolBar->AddTool(wxID_REDO, "Redo", LoadToolBitmap("Redo"));
     m_toolBar->ToggleTool(ID_TOOL_ARROW, true);
     m_toolBar->Realize();
 
@@ -50,6 +56,8 @@ cMain::cMain()
     Bind(wxEVT_TOOL, &cMain::OnToolSelected, this, ID_TOOL_TEXT);
     Bind(wxEVT_TOOL, &cMain::OnToolSelected, this, ID_TOOL_HAND);
     Bind(wxEVT_TOOL, &cMain::OnToolSelected, this, ID_TOOL_DELETE);
+    Bind(wxEVT_TOOL, &cMain::OnUndo, this, wxID_UNDO);
+    Bind(wxEVT_TOOL, &cMain::OnRedo, this, wxID_REDO);
 
     // 绑定 Save/Load JSON 菜单
     Bind(wxEVT_MENU, &cMain::OnSaveJson, this, ID_SaveJSON);
@@ -62,6 +70,13 @@ cMain::cMain()
 
     // --- 右侧：绘图画布 ---
     drawBoard = new DrawBoard(m_splitter);
+    drawBoard->SetCommandManager(&m_cmdMgr);  // ★ 交给画布
+
+    // 撤销/重做状态变化时更新工具栏按钮可用状态
+    m_cmdMgr.SetOnChanged([this](bool canUndo, bool canRedo) {
+        UpdateUndoRedoUI(canUndo, canRedo);
+        });
+
     drawBoard->pSelectedGateName = &selectedGateName;
 
     // --- 左侧：面板容器，内部再做上下分割（上资源树 / 下属性面板） ---
@@ -270,3 +285,12 @@ void cMain::OnLoadJson(wxCommandEvent& evt)
     if (dlg.ShowModal() == wxID_CANCEL) return;
     drawBoard->LoadFromJson(std::string(dlg.GetPath().mb_str()));
 }
+
+void cMain::UpdateUndoRedoUI(bool canUndo, bool canRedo) {
+    if (!m_toolBar) return;
+    m_toolBar->EnableTool(wxID_UNDO, canUndo);
+    m_toolBar->EnableTool(wxID_REDO, canRedo);
+}
+
+void cMain::OnUndo(wxCommandEvent&) { m_cmdMgr.Undo(); }
+void cMain::OnRedo(wxCommandEvent&) { m_cmdMgr.Redo(); }
