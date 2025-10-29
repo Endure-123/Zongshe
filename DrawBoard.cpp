@@ -572,6 +572,7 @@ ComponentType DrawBoard::NameToType(const wxString& s)
     wxString u = s.Upper().Trim(true).Trim(false);
 
     // 先匹配更具体的
+    if (u.Contains("XNOR")) return XNORGATE;        // ★ 新增
     if (u.Contains("NAND")) return NANDGATE;
     if (u.Contains("NOR"))  return NORGATE;
     if (u.Contains("XOR"))  return XORGATE;
@@ -581,6 +582,12 @@ ComponentType DrawBoard::NameToType(const wxString& s)
     if (u.Contains("OR"))   return ORGATE;
     if (u.Contains("AND"))  return ANDGATE;
 
+    // 译码器
+    if (u.Contains("DECODER38") || u.Contains("DEC3TO8") || u.Contains("3-8"))
+        return DECODER38;                              // ★ 新增
+    if (u.Contains("DECODER24") || u.Contains("DEC2TO4") || u.Contains("2-4"))
+        return DECODER24;                              // ★ 新增
+
     // 结点
     if (u.Contains("START_NODE") || u.Contains("STARTNODE") || u.Contains("起始")) return NODE_START;
     if (u.Contains("END_NODE") || u.Contains("ENDNODE") || u.Contains("终止")) return NODE_END;
@@ -588,6 +595,7 @@ ComponentType DrawBoard::NameToType(const wxString& s)
 
     return ANDGATE; // 兜底
 }
+
 
 const char* DrawBoard::TypeToName(ComponentType t)
 {
@@ -598,6 +606,9 @@ const char* DrawBoard::TypeToName(ComponentType t)
     case NANDGATE:    return "NAND";
     case NORGATE:     return "NOR";
     case XORGATE:     return "XOR";
+    case XNORGATE:    return "XNOR";       // ★ 新增
+    case DECODER24:   return "DECODER24";  // ★ 新增
+    case DECODER38:   return "DECODER38";  // ★ 新增
     case NODE_BASIC:  return "NODE";
     case NODE_START:  return "START_NODE";
     case NODE_END:    return "END_NODE";
@@ -614,6 +625,9 @@ std::unique_ptr<Component> DrawBoard::MakeComponent(ComponentType t, const wxPoi
     case NANDGATE:    return std::make_unique<NANDGate>(center);
     case NORGATE:     return std::make_unique<NORGate>(center);
     case XORGATE:     return std::make_unique<XORGate>(center);
+    case XNORGATE:    return std::make_unique<XNORGate>(center);   // ★ 新增
+    case DECODER24:   return std::make_unique<Decoder24>(center);  // ★ 新增
+    case DECODER38:   return std::make_unique<Decoder38>(center);  // ★ 新增
     case NODE_BASIC:  return std::make_unique<NodeDot>(center);
     case NODE_START:  return std::make_unique<StartNode>(center);
     case NODE_END:    return std::make_unique<EndNode>(center);

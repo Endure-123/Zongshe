@@ -115,6 +115,9 @@ cMain::cMain()
     // 02 复合逻辑门
     wxTreeItemId catCombo = m_treeCtrl->AppendItem(root, "02 复合逻辑门");
     m_treeCtrl->AppendItem(catCombo, "与非门"); // NAND
+    m_treeCtrl->AppendItem(catCombo, "或非门"); // NOR   
+    m_treeCtrl->AppendItem(catCombo, "异或门"); // XOR   
+    m_treeCtrl->AppendItem(catCombo, "同或门"); // XNOR  
 
     // 03 结点（目前没有，预留空分类）
     wxTreeItemId catNodes = m_treeCtrl->AppendItem(root, "03 结点");
@@ -230,37 +233,33 @@ void cMain::SetSelectedGate(const wxString& label)
         return;
     }
 
-    // 中文 → 内部元件名 映射
-    // 只把已经实现的门映射到 AND/OR/NOT/NAND
+    // 中文 → 内部元件名
     wxString internal;
-    if (label == "与门")   internal = "AND";
-    else if (label == "或门")   internal = "OR";
-    else if (label == "非门")   internal = "NOT";
-    else if (label == "与非门") internal = "NAND";
-    else if (label == "普通结点") internal = "NODE";
-    else if (label == "起始节点") internal = "START_NODE";
-    else if (label == "终止节点") internal = "END_NODE";
-    // 扩展与结点（当前未实现）
-    else if (label == "3-8译码器" || label == "2-4译码器") {
-        selectedGateName.Clear();
-        drawBoard->pSelectedGateName->Clear();
-        SetStatusText(label + "：暂未实现，后续补上。");
-        return;
-    }
+    if (label == "与门")       internal = "AND";
+    else if (label == "或门")       internal = "OR";
+    else if (label == "非门")       internal = "NOT";
+    else if (label == "与非门")     internal = "NAND";
+    else if (label == "或非门")     internal = "NOR";         // ★ 新增
+    else if (label == "异或门")     internal = "XOR";         // ★ 新增
+    else if (label == "同或门")     internal = "XNOR";        // ★ 新增
+    else if (label == "普通结点")   internal = "NODE";
+    else if (label == "起始节点")   internal = "START_NODE";
+    else if (label == "终止节点")   internal = "END_NODE";
+    else if (label == "3-8译码器")  internal = "DECODER38";   // ★ 新增
+    else if (label == "2-4译码器")  internal = "DECODER24";   // ★ 新增
     else {
-        // 其他未知项
         selectedGateName.Clear();
         drawBoard->pSelectedGateName->Clear();
         SetStatusText("未知条目：" + label);
         return;
     }
 
-    // 设置选择并提示到状态栏
-    selectedGateName = internal;                // 例如 "AND"
-    *drawBoard->pSelectedGateName = internal;   // 供画布插入模式使用
+    selectedGateName = internal;
+    *drawBoard->pSelectedGateName = internal;
     m_toolBar->ToggleTool(ID_TOOL_ARROW, false);
     SetStatusText("已选择元件：" + label + "（" + internal + "），请在画布点击放置。");
 }
+
 
 
 void cMain::OnTreeItemActivated(wxTreeEvent& event)

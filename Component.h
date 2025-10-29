@@ -2,18 +2,21 @@
 #include <wx/wx.h>
 #include <vector> 
 
-// 新增更完整的门类型
+// 新增更完整的门/器件类型
 enum ComponentType {
     ANDGATE,
     ORGATE,
     NOTGATE,
     NANDGATE,
-    NORGATE,   // 注意：枚举名用 NORGATE（读作 NOR Gate）
+    NORGATE,      // NOR
     XORGATE,
+    XNORGATE,     // ★ 新增：XNOR
     POWER,
-    NODE_BASIC,     // 普通结点（小圆点，多线汇聚）
-    NODE_START,     // 起始节点（信号源，箭头）
-    NODE_END        // 终止节点（空心圆，信号终点）
+    NODE_BASIC,   // 普通结点（小圆点，多线汇聚）
+    NODE_START,   // 起始节点
+    NODE_END,     // 终止节点
+    DECODER24,    // ★ 新增：2-4 译码器
+    DECODER38     // ★ 新增：3-8 译码器
 };
 
 class Component {
@@ -120,7 +123,7 @@ public:
     std::vector<wxPoint> GetPins() const override;
 };
 
-// ---------- XOR（= OR 的前缘双曲线） ----------
+// ---------- XOR ----------
 class XORGate : public Gate {
 public:
     XORGate(wxPoint center, ComponentType type = XORGATE) : Gate(center, type) {
@@ -132,6 +135,20 @@ public:
     void UpdateGeometry() override;
     std::vector<wxPoint> GetPins() const override;
 };
+
+// ---------- XNOR（= XOR + 气泡） ----------
+class XNORGate : public Gate {
+public:
+    XNORGate(wxPoint center, ComponentType type = XNORGATE) : Gate(center, type) {
+        this->scale = 1.0;
+        UpdateGeometry();
+    }
+    void drawSelf(wxMemoryDC& memDC) override;
+    bool Isinside(const wxPoint& point) const override;
+    void UpdateGeometry() override;
+    std::vector<wxPoint> GetPins() const override;
+};
+
 // ---------- 普通结点 ----------
 class NodeDot : public Component {
 public:
@@ -172,4 +189,30 @@ public:
     bool Isinside(const wxPoint& p) const override;
     void UpdateGeometry() override;
     std::vector<wxPoint> GetPins() const override;
+};
+
+// ---------- 2-4 译码器 ----------
+class Decoder24 : public Component {
+public:
+    explicit Decoder24(wxPoint center, ComponentType type = DECODER24)
+        : Component(center, type) {
+        UpdateGeometry();
+    }
+    void drawSelf(wxMemoryDC& memDC) override;
+    bool Isinside(const wxPoint& p) const override;
+    void UpdateGeometry() override;
+    std::vector<wxPoint> GetPins() const override; // EN + A0 + A1 + Y0..Y3
+};
+
+// ---------- 3-8 译码器 ----------
+class Decoder38 : public Component {
+public:
+    explicit Decoder38(wxPoint center, ComponentType type = DECODER38)
+        : Component(center, type) {
+        UpdateGeometry();
+    }
+    void drawSelf(wxMemoryDC& memDC) override;
+    bool Isinside(const wxPoint& p) const override;
+    void UpdateGeometry() override;
+    std::vector<wxPoint> GetPins() const override; // EN + A0..A2 + Y0..Y7
 };
