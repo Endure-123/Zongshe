@@ -121,6 +121,10 @@ public:
     std::optional<WireSnapshot> ExportWireByIndex(long id) const;        // 导出 wire 快照
     void DeleteWireByIndex(long id);                                      // 删除 wire
 
+    void ZoomInCenter();                                        // 以视窗中心放大
+    void ZoomOutCenter();                                       // 以视窗中心缩小
+    void ZoomBy(double factor, const wxPoint& anchorDevicePt);  // 以给定屏幕点为锚
+
 private:
     void OnPaint(wxPaintEvent& event);
     void OnButtonMove(wxMouseEvent& event);

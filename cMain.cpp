@@ -49,6 +49,8 @@ cMain::cMain()
     m_toolBar->AddTool(ID_TOOL_DELETE, "Delete", LoadToolBitmap("delete"));
     m_toolBar->AddTool(wxID_UNDO, "Undo", LoadToolBitmap("Undo"));
     m_toolBar->AddTool(wxID_REDO, "Redo", LoadToolBitmap("Redo"));
+    m_toolBar->AddTool(ID_TOOL_ZOOMIN, "Zoom In", LoadToolBitmap("ZoomIn"));
+    m_toolBar->AddTool(ID_TOOL_ZOOMOUT, "Zoom Out", LoadToolBitmap("ZoomOut"));
     m_toolBar->ToggleTool(ID_TOOL_ARROW, true);
     m_toolBar->Realize();
 
@@ -58,6 +60,8 @@ cMain::cMain()
     Bind(wxEVT_TOOL, &cMain::OnToolSelected, this, ID_TOOL_DELETE);
     Bind(wxEVT_TOOL, &cMain::OnUndo, this, wxID_UNDO);
     Bind(wxEVT_TOOL, &cMain::OnRedo, this, wxID_REDO);
+    Bind(wxEVT_TOOL, &cMain::OnZoomIn, this, ID_TOOL_ZOOMIN);
+    Bind(wxEVT_TOOL, &cMain::OnZoomOut, this, ID_TOOL_ZOOMOUT);
 
     // 绑定 Save/Load JSON 菜单
     Bind(wxEVT_MENU, &cMain::OnSaveJson, this, ID_SaveJSON);
@@ -294,3 +298,6 @@ void cMain::UpdateUndoRedoUI(bool canUndo, bool canRedo) {
 
 void cMain::OnUndo(wxCommandEvent&) { m_cmdMgr.Undo(); }
 void cMain::OnRedo(wxCommandEvent&) { m_cmdMgr.Redo(); }
+
+void cMain::OnZoomIn(wxCommandEvent&) { if (drawBoard) drawBoard->ZoomInCenter(); }
+void cMain::OnZoomOut(wxCommandEvent&) { if (drawBoard) drawBoard->ZoomOutCenter(); }

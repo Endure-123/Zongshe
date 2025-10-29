@@ -2,6 +2,8 @@
 #include <fstream>
 #include "SelectionEvents.h"
 #include "EditCommands.h"
+#include <cmath>   // 为 std::lround
+
 
 // 选中锚点配色
 const wxColour DrawBoard::HANDLE_FILL_RGB(255, 255, 255);
@@ -824,4 +826,67 @@ void DrawBoard::DeleteWireByIndex(long id) {
     wires.erase(wires.begin() + id);
     if (selectedWireIndex == id) selectedWireIndex = -1;
     Refresh(false);
+}
+
+// ======= 缩放实现（模型等比例变换） =======
+void DrawBoard::ZoomBy(double factor, const wxPoint& anchorDevicePt)
+{
+    if (factor <= 0.0 || factor == 1.0) return;
+
+    auto Z = [&](int v, int a) -> int {
+        double r = a + (v - a) * factor;   // p' = a + (p - a) * s
+        return (int)std::lround(r);
+        };
+
+    // 1) 连线点（折线）
+    for (auto& poly : wires) {
+        for (auto& p : poly) {
+            p.x = Z(p.x, anchorDevicePt.x);
+            p.y = Z(p.y, anchorDevicePt.y);
+        }
+    }
+
+    // 2) 文本位置
+    for (auto& tp : texts) {
+        tp.first.x = Z(tp.first.x, anchorDevicePt.x);
+        tp.first.y = Z(tp.first.y, anchorDevicePt.y);
+    }
+
+    // 3) 元件：中心与尺寸（scale）
+    for (auto& up : components) {
+        if (!up) continue;
+        Component* c = up.get();
+        wxPoint cen = c->GetCenter();
+        cen.x = Z(cen.x, anchorDevicePt.x);
+        cen.y = Z(cen.y, anchorDevicePt.y);
+        c->SetCenter(cen);
+
+        c->scale *= factor;      // 让门图标随页面一起变大/变小
+        c->UpdateGeometry();     // 引脚等几何量重算，线跟随逻辑可复用
+    }
+
+    // 4) 兼容旧的直线容器（如仍在使用）
+    for (auto& seg : lines) {
+        seg.first.x = Z(seg.first.x, anchorDevicePt.x);
+        seg.first.y = Z(seg.first.y, anchorDevicePt.y);
+        seg.second.x = Z(seg.second.x, anchorDevicePt.x);
+        seg.second.y = Z(seg.second.y, anchorDevicePt.y);
+    }
+
+    Refresh(false);
+    Update();
+}
+
+void DrawBoard::ZoomInCenter()
+{
+    const wxSize cs = GetClientSize();
+    const wxPoint anchor(cs.GetWidth() / 2, cs.GetHeight() / 2);
+    ZoomBy(1.1, anchor);         // 每次放大 10%
+}
+
+void DrawBoard::ZoomOutCenter()
+{
+    const wxSize cs = GetClientSize();
+    const wxPoint anchor(cs.GetWidth() / 2, cs.GetHeight() / 2);
+    ZoomBy(1.0 / 1.1, anchor);   // 每次缩小 10%
 }

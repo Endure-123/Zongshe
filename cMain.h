@@ -10,7 +10,9 @@
 
 enum {
     ID_SaveJSON = wxID_HIGHEST + 100,
-    ID_LoadJSON
+    ID_LoadJSON,
+    ID_TOOL_ZOOMIN,
+    ID_TOOL_ZOOMOUT
 };
 
 // 前向声明：属性面板，避免头文件循环依赖
@@ -56,7 +58,9 @@ private:
     void SetSelectedGate(const wxString& label);
 
     void OnUndo(wxCommandEvent&);     
-    void OnRedo(wxCommandEvent&);     
+    void OnRedo(wxCommandEvent&);
+    void OnZoomIn(wxCommandEvent&);
+    void OnZoomOut(wxCommandEvent&);
     void UpdateUndoRedoUI(bool canUndo, bool canRedo); 
 
     wxAuiManager m_mgr;
