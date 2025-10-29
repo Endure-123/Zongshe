@@ -44,6 +44,17 @@ public:
     // 线/文本/鼠标
     wxPoint currentStart, currentEnd, mousePos;
     bool isDrawingLine = false, isInsertingText = false, isDrawing = false;
+    int selectedTextIndex = -1;           // 选中的文本（texts 数组下标）
+
+    // 文本拖动状态（与元件拖动解耦）
+    int     m_dragTextIndex = -1;
+    bool    m_isDraggingText = false;
+    wxPoint m_dragTextStartMouse;
+    wxPoint m_dragTextStartPos;
+
+    // —— 文本相关接口 —— 
+    int  HitTestText(const wxPoint& pt) const;  // 命中哪个文本（-1 表示未命中）
+    void DeleteSelectedText();                   // 删除选中文本（不进撤销栈）
 
     // 替换旧的直线容器：每根线是一条折线（点序列）
     std::vector<std::vector<wxPoint>> wires;

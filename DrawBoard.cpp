@@ -85,6 +85,22 @@ void DrawBoard::OnPaint(wxPaintEvent& event)
             gc->DrawText(txt.second, txt.first.x, txt.first.y);
         }
 
+        // ====== 新增：被选中文本的可视化选框 ======
+        if (selectedTextIndex >= 0 && selectedTextIndex < (int)texts.size()) {
+            const auto& t = texts[selectedTextIndex];
+            gc->SetFont(wxFontInfo(12).Family(wxFONTFAMILY_DEFAULT), *wxBLACK);
+
+            double tw, th, descent, extlead;
+            gc->GetTextExtent(t.second, &tw, &th, &descent, &extlead);
+
+            const int pad = 3; // 选框内边距
+            wxRect box(t.first.x - pad, t.first.y - pad, (int)tw + pad * 2, (int)th + pad * 2);
+
+            gc->SetPen(wxPen(wxColour(0, 120, 215), 1, wxPENSTYLE_SOLID)); // Windows选中蓝
+            gc->SetBrush(*wxTRANSPARENT_BRUSH);
+            gc->DrawRectangle(box.x, box.y, box.width, box.height);
+        }
+
         // ⭐ 矢量门绘制
         for (int i = 0; i < (int)components.size(); ++i) {
             components[i]->SetSelected(i == selectedGateIndex);
@@ -131,6 +147,16 @@ void DrawBoard::OnButtonMove(wxMouseEvent& event)
         }
         return;
     }
+
+    // 拖动文本（不吸附）
+    if (m_isDraggingText && m_dragTextIndex >= 0 && m_dragTextIndex < (int)texts.size()) {
+        const wxPoint delta = mousePos - m_dragTextStartMouse;
+        wxPoint target = m_dragTextStartPos + delta; // 不使用 SnapToStep / SnapToGrid
+        texts[m_dragTextIndex].first = target;
+        Refresh(false);
+        return;
+    }
+
     Refresh(false);
 }
 
@@ -167,17 +193,45 @@ void DrawBoard::OnLeftDown(wxMouseEvent& event)
             m_draggingIndex = -1;
             m_isDragging = false;
 
-            // 命中线
+            // 先看连线
             int w = HitTestWire(pos);
             if (w >= 0) {
                 selectedWireIndex = w;
                 m_selKind = SelKind::Wire;
                 m_selId = selectedWireIndex;
+
+                // 取消文本选择/拖动
+                selectedTextIndex = -1;
+                m_isDraggingText = false;
+                m_dragTextIndex = -1;
             }
             else {
                 selectedWireIndex = -1;
-                m_selKind = SelKind::None;
-                m_selId = -1;
+
+                // ===== 新增：命中文本？ =====
+                int t = HitTestText(pos);
+                if (t >= 0) {
+                    selectedTextIndex = t;
+
+                    // 准备拖动文本
+                    m_isDraggingText = true;
+                    m_dragTextIndex = t;
+                    m_dragTextStartMouse = pos;
+                    m_dragTextStartPos = texts[t].first;
+
+                    // 不改变 SelKind（避免影响你现有的属性面板逻辑）
+                    m_selKind = SelKind::None;
+                    m_selId = -1;
+                }
+                else {
+                    // 均未命中
+                    selectedTextIndex = -1;
+                    m_isDraggingText = false;
+                    m_dragTextIndex = -1;
+
+                    m_selKind = SelKind::None;
+                    m_selId = -1;
+                }
             }
             Refresh(false);
             NotifySelectionChanged();
@@ -227,6 +281,14 @@ void DrawBoard::OnLeftUp(wxMouseEvent& event)
         Refresh(false);
     }
 
+    // 结束文本拖动（不进入撤销/重做）
+    if (m_isDraggingText) {
+        m_isDraggingText = false;
+        m_dragTextIndex = -1;
+        Refresh(false);
+    }
+
+
     // 旧直线逻辑（保持兼容）
     if (isDrawingLine && isDrawing) {
         currentEnd = event.GetPosition();
@@ -261,6 +323,40 @@ void DrawBoard::OnLeftUp(wxMouseEvent& event)
         return;
     }
 }
+
+int DrawBoard::HitTestText(const wxPoint& pt) const
+{
+    // 从上往下（后绘制优先）
+    // 注意：需要一个 gc/度量，这里临时创建 DC+GC
+    wxBitmap tmpBmp(1, 1);
+    wxMemoryDC mdc(tmpBmp);
+    std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(mdc));
+    if (!gc) return -1;
+
+    // 与绘制时一致的字体
+    gc->SetFont(wxFontInfo(12).Family(wxFONTFAMILY_DEFAULT), *wxBLACK);
+
+    for (int i = (int)texts.size() - 1; i >= 0; --i) {
+        const auto& t = texts[i];
+        double tw, th, descent, extlead;
+        gc->GetTextExtent(t.second, &tw, &th, &descent, &extlead);
+        wxRect box(t.first.x, t.first.y, (int)tw, (int)th);
+        // 给点小容差，选中体验更好
+        box.Inflate(3, 3);
+        if (box.Contains(pt)) return i;
+    }
+    return -1;
+}
+
+void DrawBoard::DeleteSelectedText()
+{
+    if (selectedTextIndex >= 0 && selectedTextIndex < (int)texts.size()) {
+        texts.erase(texts.begin() + selectedTextIndex);
+        selectedTextIndex = -1;
+        Refresh(false);
+    }
+}
+
 
 // ============ 对外接口 ============
 void DrawBoard::ClearTexts() { texts.clear(); Refresh(false); }
@@ -314,6 +410,7 @@ void DrawBoard::DeleteSelectedWire() {
 void DrawBoard::DeleteSelection() {
     if (selectedGateIndex >= 0) { DeleteSelectedGate(); return; }
     if (selectedWireIndex >= 0) { DeleteSelectedWire(); return; }
+    if (selectedTextIndex >= 0) { DeleteSelectedText(); return; }
     // 什么也没选中就不做事
 }
 
