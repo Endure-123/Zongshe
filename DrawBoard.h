@@ -11,6 +11,8 @@
 #include "Component.h"
 #include "SelectionEvents.h"
 #include "UndoRedo.h"
+#include <filesystem>
+#include "BookShelfExporter.h"
 
 // 统一选择类型（供属性面板查询）
 enum class SelKind { None = 0, Gate = 1, Wire = 2 };
@@ -93,6 +95,12 @@ public:
     void DeleteSelection();                  // 优先删除元件，否则删除线
     void ClearTexts();
     void ClearPics();
+
+	// ===== 书架格式导入导出 =====
+    bool ExportAsBookShelf(const std::string& projectName,
+        const std::filesystem::path& outDir);
+    bool ImportBookShelf(const std::filesystem::path& nodesPath,
+        const std::filesystem::path& netsPath);
 
     // JSON
     void SaveToJson(const std::string& filename);

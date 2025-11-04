@@ -51,6 +51,12 @@
     <ClInclude Include="EditCommands.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="BookShelfExporter.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="BookShelfImporter.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ResourceManager.cpp">
@@ -72,6 +78,12 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="PropertyPane.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="BookShelfExporter.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="BookShelfImporter.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

@@ -7,12 +7,15 @@
 #include "DrawBoard.h"
 #include "AppConfig.h"
 #include "UndoRedo.h" 
+#include <filesystem>
 
 enum {
     ID_SaveJSON = wxID_HIGHEST + 100,
     ID_LoadJSON,
     ID_TOOL_ZOOMIN,
-    ID_TOOL_ZOOMOUT
+    ID_TOOL_ZOOMOUT,
+    ID_Menu_ExportBookShelf,
+    ID_Menu_ImportBookShelf
 };
 
 // 前向声明：属性面板，避免头文件循环依赖
@@ -62,6 +65,9 @@ private:
     void OnZoomIn(wxCommandEvent&);
     void OnZoomOut(wxCommandEvent&);
     void UpdateUndoRedoUI(bool canUndo, bool canRedo); 
+
+    void OnExportBookShelf(wxCommandEvent& evt);
+    void OnImportBookShelf(wxCommandEvent&);
 
     wxAuiManager m_mgr;
     wxSplitterWindow* m_leftSplitter = nullptr;

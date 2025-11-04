@@ -20,6 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AppConfig.h" />
+    <ClInclude Include="BookShelfExporter.h" />
+    <ClInclude Include="BookShelfImporter.h" />
     <ClInclude Include="cApp.h" />
     <ClInclude Include="cMain.h" />
     <ClInclude Include="Component.h" />
@@ -33,6 +35,8 @@
     <ClInclude Include="UndoRedo.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="BookShelfExporter.cpp" />
+    <ClCompile Include="BookShelfImporter.cpp" />
     <ClCompile Include="cApp.cpp" />
     <ClCompile Include="cMain.cpp" />
     <ClCompile Include="Component.cpp" />

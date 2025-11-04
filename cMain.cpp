@@ -3,9 +3,19 @@
 #include "ResourceManager.h"
 #include <vector>
 
+// ★ 新增：对话框/消息框/文件系统
+#include <wx/dir.h>
+#include <wx/msgdlg.h>
+#include <filesystem>
+
 // ★ 属性面板与选择事件
 #include "PropertyPane.h"
 #include "SelectionEvents.h"
+
+// ★ 新增：导出菜单的 ID（也会在 cMain.h 里补一个同名 ID）
+#ifndef ID_Menu_ExportBookShelf
+#define ID_Menu_ExportBookShelf (wxID_HIGHEST + 1001)
+#endif
 
 wxBEGIN_EVENT_TABLE(cMain, wxFrame)
 EVT_MENU(wxID_EXIT, cMain::OnExit)
@@ -15,7 +25,7 @@ EVT_MENU(2001, cMain::OnClearTexts)
 EVT_MENU(2002, cMain::OnClearPics)
 wxEND_EVENT_TABLE()
 
-wxBitmap cMain::LoadToolBitmap(const wxString & filename, int size)
+wxBitmap cMain::LoadToolBitmap(const wxString& filename, int size)
 {
     return ResourceManager::LoadBitmap(IMG_DIR, filename, size);
 }
@@ -28,14 +38,27 @@ cMain::cMain()
     fileMenu = new wxMenu();
     fileMenu->Append(ID_SaveJSON, "Save JSON\tCtrl+S");
     fileMenu->Append(ID_LoadJSON, "Load JSON\tCtrl+O");
+
+    // ★ 新增：Export as BookShelf… 菜单项（快捷键 Ctrl+E）
+    fileMenu->AppendSeparator();
+    fileMenu->Append(ID_Menu_ExportBookShelf,
+        "Export as &BookShelf...\tCtrl+E",
+        "Export current design to BookShelf (.nodes/.nets)");
+
     fileMenu->AppendSeparator();
     fileMenu->Append(wxID_EXIT, "E&xit\tAlt+F4");
     menuBar->Append(fileMenu, "&File");
 
+    fileMenu->Append(ID_Menu_ImportBookShelf,
+        "Import &BookShelf...\tCtrl+I",
+        "Import from BookShelf (.nodes + .nets)");
+    Bind(wxEVT_MENU, &cMain::OnImportBookShelf, this, ID_Menu_ImportBookShelf);
+
+
     editMenu = new wxMenu();
     editMenu->Append(2001, "Clear &Texts");
     editMenu->Append(2002, "Clear &Lines");
-    editMenu->Prepend(wxID_REDO, "重做\tCtrl+Y"); 
+    editMenu->Prepend(wxID_REDO, "重做\tCtrl+Y");
     editMenu->Prepend(wxID_UNDO, "撤销\tCtrl+Z");
     menuBar->Append(editMenu, "&Edit");
 
@@ -66,6 +89,9 @@ cMain::cMain()
     // 绑定 Save/Load JSON 菜单
     Bind(wxEVT_MENU, &cMain::OnSaveJson, this, ID_SaveJSON);
     Bind(wxEVT_MENU, &cMain::OnLoadJson, this, ID_LoadJSON);
+
+    // ★ 新增：绑定导出菜单
+    Bind(wxEVT_MENU, &cMain::OnExportBookShelf, this, ID_Menu_ExportBookShelf);
 
     // ===================== 主体区域：左(树+属性) | 右(画布) =====================
     // 外层左右分割：左侧容器 + 右侧画布
@@ -115,17 +141,17 @@ cMain::cMain()
     // 02 复合逻辑门
     wxTreeItemId catCombo = m_treeCtrl->AppendItem(root, "02 复合逻辑门");
     m_treeCtrl->AppendItem(catCombo, "与非门"); // NAND
-    m_treeCtrl->AppendItem(catCombo, "或非门"); // NOR   
-    m_treeCtrl->AppendItem(catCombo, "异或门"); // XOR   
-    m_treeCtrl->AppendItem(catCombo, "同或门"); // XNOR  
+    m_treeCtrl->AppendItem(catCombo, "或非门"); // NOR
+    m_treeCtrl->AppendItem(catCombo, "异或门"); // XOR
+    m_treeCtrl->AppendItem(catCombo, "同或门"); // XNOR
 
-    // 03 结点（目前没有，预留空分类）
+    // 03 结点
     wxTreeItemId catNodes = m_treeCtrl->AppendItem(root, "03 结点");
     m_treeCtrl->AppendItem(catNodes, "普通结点");
     m_treeCtrl->AppendItem(catNodes, "起始节点");
     m_treeCtrl->AppendItem(catNodes, "终止节点");
 
-    // 04 扩展元器件（先放两个占位/示例）
+    // 04 扩展元器件
     wxTreeItemId catExt = m_treeCtrl->AppendItem(root, "04 扩展元器件");
     m_treeCtrl->AppendItem(catExt, "3-8译码器");
     m_treeCtrl->AppendItem(catExt, "2-4译码器");
@@ -260,8 +286,6 @@ void cMain::SetSelectedGate(const wxString& label)
     SetStatusText("已选择元件：" + label + "（" + internal + "），请在画布点击放置。");
 }
 
-
-
 void cMain::OnTreeItemActivated(wxTreeEvent& event)
 {
     SetSelectedGate(m_treeCtrl->GetItemText(event.GetItem()));
@@ -300,3 +324,65 @@ void cMain::OnRedo(wxCommandEvent&) { m_cmdMgr.Redo(); }
 
 void cMain::OnZoomIn(wxCommandEvent&) { if (drawBoard) drawBoard->ZoomInCenter(); }
 void cMain::OnZoomOut(wxCommandEvent&) { if (drawBoard) drawBoard->ZoomOutCenter(); }
+
+// ★ 新增：导出为 BookShelf 的菜单处理函数
+void cMain::OnExportBookShelf(wxCommandEvent&)
+{
+    if (!drawBoard) {
+        wxMessageBox("DrawBoard is not ready.", "Export", wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    // 选择输出目录（默认 MyOwn/output）
+    wxDirDialog dlg(this, "Choose output folder",
+        "MyOwn/output",
+        // 如果希望在对话框中可以新建目录，可以去掉 wxDD_DIR_MUST_EXIST
+        wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
+
+    if (dlg.ShowModal() != wxID_OK) return;
+
+    std::filesystem::path outDir = dlg.GetPath().ToStdWstring();
+
+    // 兜底：如果不存在就创建
+    std::error_code ec;
+    std::filesystem::create_directories(outDir, ec);
+
+    const bool ok = drawBoard->ExportAsBookShelf("MyOwn", outDir);
+    if (ok) {
+        wxMessageBox("Exported successfully to:\n" + dlg.GetPath(),
+            "Export", wxOK | wxICON_INFORMATION, this);
+    }
+    else {
+        wxMessageBox("Export failed.", "Export", wxOK | wxICON_ERROR, this);
+    }
+}
+
+void cMain::OnImportBookShelf(wxCommandEvent&)
+{
+    if (!drawBoard) {
+        wxMessageBox("DrawBoard is not ready.", "Import", wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    // 选 .nodes
+    wxFileDialog dlgNodes(this, "Choose .nodes", "", "",
+        "BookShelf nodes (*.nodes)|*.nodes|All files (*.*)|*.*",
+        wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (dlgNodes.ShowModal() != wxID_OK) return;
+
+    // 选 .nets（默认同目录）
+    wxFileDialog dlgNets(this, "Choose .nets", dlgNodes.GetDirectory(), "",
+        "BookShelf nets (*.nets)|*.nets|All files (*.*)|*.*",
+        wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (dlgNets.ShowModal() != wxID_OK) return;
+
+    std::filesystem::path nodesPath = dlgNodes.GetPath().ToStdWstring();
+    std::filesystem::path netsPath = dlgNets.GetPath().ToStdWstring();
+
+    if (drawBoard->ImportBookShelf(nodesPath, netsPath)) {
+        wxMessageBox("Imported successfully.", "Import", wxOK | wxICON_INFORMATION, this);
+    }
+    else {
+        wxMessageBox("Import failed.", "Import", wxOK | wxICON_ERROR, this);
+    }
+}

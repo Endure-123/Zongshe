@@ -3,6 +3,50 @@
 #include "SelectionEvents.h"
 #include "EditCommands.h"
 #include <cmath>   // 为 std::lround
+// === 追加：导出 BookShelf 网表 ===
+#include "BookShelfExporter.h"
+#include <unordered_map>
+#include <map>
+#include <set>
+#include "BookShelfImporter.h"
+using bookshelf::BSDesign;
+using bookshelf::ParseBookShelf;
+
+using bookshelf::Node;
+using bookshelf::Net;
+using bookshelf::Pin;
+using bookshelf::ExportOptions;
+
+namespace {
+    // 轴对齐包围盒宽高（由 m_BoundaryPoints[4] 推得）
+    inline std::pair<double, double> AABBwh(const wxPoint pts[4]) {
+        int minx = pts[0].x, maxx = pts[0].x, miny = pts[0].y, maxy = pts[0].y;
+        for (int i = 1; i < 4; ++i) {
+            minx = std::min(minx, pts[i].x);
+            maxx = std::max(maxx, pts[i].x);
+            miny = std::min(miny, pts[i].y);
+            maxy = std::max(maxy, pts[i].y);
+        }
+        return { double(maxx - minx), double(maxy - miny) };
+    }
+
+    inline bool NearlyEqual(const wxPoint& a, const wxPoint& b, int tol = 1) {
+        return (std::abs(a.x - b.x) <= tol) && (std::abs(a.y - b.y) <= tol);
+    }
+
+    inline std::string MakeNodeName(const char* base, int idx) {
+        return std::string(base) + "_" + std::to_string(idx);
+    }
+
+    // 给 component 的每个 pin 生成名字：P0,P1,...
+    inline std::string PinNameByIndex(int i) { return "P" + std::to_string(i); }
+
+    // 简单判定：起始/终止节点 -> terminal，其它为普通 cell
+    inline bool IsTerminal(ComponentType t) {
+        return (t == NODE_START || t == NODE_END);
+    }
+}
+
 
 
 // 选中锚点配色
@@ -903,4 +947,271 @@ void DrawBoard::ZoomOutCenter()
     const wxSize cs = GetClientSize();
     const wxPoint anchor(cs.GetWidth() / 2, cs.GetHeight() / 2);
     ZoomBy(1.0 / 1.1, anchor);   // 每次缩小 10%
+}
+
+// 把当前画布导出为 BookShelf .nodes + .nets
+bool DrawBoard::ExportAsBookShelf(const std::string& projectName,
+    const std::filesystem::path& outDir)
+{
+    // 1) 生成 nodes（每个元件一个 node）
+    std::vector<Node> nodes;
+    nodes.reserve(components.size());
+
+    // 建立 component 索引 -> nodeName 的映射
+    std::vector<std::string> comp2name(components.size());
+    // 用类型计数做唯一命名
+    std::map<ComponentType, int> typeCount;
+
+    for (size_t i = 0; i < components.size(); ++i) {
+        const auto& c = components[i];
+        const char* base = TypeToName(c->m_type);               // e.g. "AND"/"NODE"/"START_NODE"... :contentReference[oaicite:4]{index=4}
+        int id = ++typeCount[c->m_type];
+        std::string name = MakeNodeName(base, id);
+
+        auto [w, h] = AABBwh(c->m_BoundaryPoints);               // 用边界盒宽高做尺寸 :contentReference[oaicite:5]{index=5}
+        Node n;
+        n.name = name;
+        n.width = IsTerminal(c->m_type) ? 0.0 : std::max(1.0, w);
+        n.height = IsTerminal(c->m_type) ? 0.0 : std::max(1.0, h);
+        n.terminal = IsTerminal(c->m_type);
+
+        nodes.push_back(n);
+        comp2name[i] = name;
+    }
+
+    // 2) 把所有元件的 pin 摊平做“坐标 -> (compIdx,pinIdx)”索引
+    struct PinKey { int x, y; };
+    struct PinInfo { int compIdx; int pinIdx; wxPoint pt; };
+    struct KeyHash { size_t operator()(const PinKey& k) const { return (size_t(k.x) << 32) ^ size_t(unsigned(k.y)); } };
+    struct KeyEq { bool operator()(const PinKey& a, const PinKey& b) const { return a.x == b.x && a.y == b.y; } };
+
+    std::unordered_map<PinKey, std::vector<PinInfo>, KeyHash, KeyEq> pinAt;
+
+    std::vector<std::vector<wxPoint>> allCompPins(components.size());
+    for (size_t ci = 0; ci < components.size(); ++ci) {
+        allCompPins[ci] = components[ci]->GetPins();            // 每个元件的所有引脚坐标（画布坐标）:contentReference[oaicite:6]{index=6}
+        for (int pi = 0; pi < (int)allCompPins[ci].size(); ++pi) {
+            wxPoint p = allCompPins[ci][pi];
+            PinKey k{ p.x, p.y };
+            pinAt[k].push_back(PinInfo{ (int)ci, pi, p });
+        }
+    }
+
+    // 3) 解析 wires 端点 -> 找到对应的 pin；把“连到一起的 pin”合并成一个网
+    //    我们把“pin”作为图节点；每条 wire 把两个端点 pin 连起来；用并查集合并连通分量。
+    struct PID { int compIdx; int pinIdx; };
+    auto pidLess = [](const PID& a, const PID& b) {
+        if (a.compIdx != b.compIdx) return a.compIdx < b.compIdx;
+        return a.pinIdx < b.pinIdx;
+        };
+
+    // 为所有命中的 pin 分配一个递增 id
+    std::map<PID, int, decltype(pidLess)> pid2id(pidLess);
+    std::vector<PID> id2pid;
+
+    auto getOrAddPid = [&](int ci, int pi)->int {
+        PID k{ ci, pi };
+        auto it = pid2id.find(k);
+        if (it != pid2id.end()) return it->second;
+        int id = (int)id2pid.size();
+        id2pid.push_back(k);
+        pid2id.emplace(k, id);
+        return id;
+        };
+
+    // 并查集
+    std::vector<int> uf; // 按需增长
+    auto ufFind = [&](auto self, int x)->int {
+        if (uf[x] == x) return x;
+        uf[x] = self(self, uf[x]);
+        return uf[x];
+        };
+    auto ufUnion = [&](int a, int b) {
+        int ra = ufFind(ufFind, a), rb = ufFind(ufFind, b);
+        if (ra != rb) uf[rb] = ra;
+        };
+
+    auto ensureUf = [&](int needSize) {
+        int old = (int)uf.size();
+        if (needSize > old) {
+            uf.resize(needSize);
+            for (int i = old; i < needSize; ++i) uf[i] = i;
+        }
+        };
+
+    auto findPinByPoint = [&](const wxPoint& p)->std::vector<PinInfo> {
+        // 先尝试完全相等，再尝试 1px 容忍
+        PinKey k{ p.x, p.y };
+        auto it = pinAt.find(k);
+        if (it != pinAt.end()) return it->second;
+        // 容忍 1px（匹配你移动重布线时的容忍逻辑）:contentReference[oaicite:7]{index=7}
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dy = -1; dy <= 1; ++dy) {
+                if (dx == 0 && dy == 0) continue;
+                PinKey k2{ p.x + dx, p.y + dy };
+                auto it2 = pinAt.find(k2);
+                if (it2 != pinAt.end()) return it2->second;
+            }
+        return {};
+        };
+
+    for (const auto& poly : wires) {
+        if (poly.size() < 2) continue;
+        wxPoint a = poly.front();
+        wxPoint b = poly.back();
+
+        auto pinsA = findPinByPoint(a);
+        auto pinsB = findPinByPoint(b);
+        if (pinsA.empty() || pinsB.empty()) continue; // 端点没吸到 pin 就忽略该线段
+
+        // 允许端点上多 pin（少见），做笛卡尔连接
+        for (const auto& pa : pinsA) {
+            for (const auto& pb : pinsB) {
+                int idA = getOrAddPid(pa.compIdx, pa.pinIdx);
+                int idB = getOrAddPid(pb.compIdx, pb.pinIdx);
+                ensureUf(std::max(idA, idB) + 1);
+                ufUnion(idA, idB);
+            }
+        }
+    }
+
+    // 4) 把每个连通分量变成一个 Net，填入 pins（计算相对偏移）
+    std::unordered_map<int, std::vector<int>> compSets; // rootId -> [pidId...]
+    for (int id = 0; id < (int)id2pid.size(); ++id) {
+        int root = ufFind(ufFind, id);
+        compSets[root].push_back(id);
+    }
+
+    std::vector<Net> nets;
+    int autoNetIdx = 0;
+
+    for (auto& kv : compSets) {
+        const auto& pidList = kv.second;
+        if (pidList.size() < 2) continue; // 单引脚不构成网
+
+        Net net;
+        net.name = "net_" + std::to_string(autoNetIdx++);
+
+        for (int pid : pidList) {
+            const auto [ci, pi] = id2pid[pid];
+            const auto& comp = components[ci];
+            const wxPoint ccen = comp->GetCenter();
+            const wxPoint ppt = allCompPins[ci][pi];
+
+            Pin p;
+            p.cellName = comp2name[ci];
+            p.pinName = PinNameByIndex(pi);
+            p.dx = double(ppt.x - ccen.x);
+            p.dy = double(ppt.y - ccen.y);
+            net.pins.push_back(std::move(p));
+        }
+        nets.push_back(std::move(net));
+    }
+
+    // 5) 调用通用导出器
+    ExportOptions opt;
+    opt.outDir = outDir;
+    opt.floatPrecision = 6;
+
+    auto [nodesPath, netsPath] =
+        bookshelf::ExportBookShelf(projectName, nodes, nets, opt);
+
+    // 你也可以弹一个提示框
+    // wxMessageBox(wxString::Format("已导出：\n%s\n%s",
+    //     nodesPath.wstring(), netsPath.wstring()), "Export", wxOK | wxICON_INFORMATION);
+
+    return true;
+}
+
+// —— 简单栅格排布（无 .pl 时的兜底）：把 N 个节点铺成 R 行 C 列 —— //
+static std::vector<wxPoint> AutoGridPlace(int N, const wxSize& canvasSize,
+    int cellW = 140, int cellH = 100, int margin = 60)
+{
+    std::vector<wxPoint> centers;
+    if (N <= 0) return centers;
+    int cols = std::max(1, (int)std::sqrt((double)N));
+    int rows = (N + cols - 1) / cols;
+
+    int x0 = margin, y0 = margin;
+    for (int i = 0; i < N; ++i) {
+        int r = i / cols, c = i % cols;
+        int x = x0 + c * cellW;
+        int y = y0 + r * cellH;
+        centers.emplace_back(x, y);
+    }
+    return centers;
+}
+
+// —— 根据名字前缀推断类型（AND_1 => AND），走你的 NameToType 再 MakeComponent —— //
+static ComponentType GuessTypeFromNodeName(DrawBoard* board, const std::string& nodeName)
+{
+    // 截到 '_' 前（如果没有 '_' 就用全名）
+    std::string base = nodeName;
+    size_t k = nodeName.find('_');
+    if (k != std::string::npos) base = nodeName.substr(0, k);
+
+    return board->NameToType(wxString::FromUTF8(base.c_str())); // 你的 NameToType()。:contentReference[oaicite:3]{index=3}
+}
+
+bool DrawBoard::ImportBookShelf(const std::filesystem::path& nodesPath,
+    const std::filesystem::path& netsPath)
+{
+    BSDesign d = ParseBookShelf(nodesPath, netsPath);
+
+    // 1) 清空当前画布
+    wires.clear(); lines.clear(); texts.clear(); components.clear();
+
+    // 2) 生成组件：类型来自名称前缀（AND/NOR/DECODER24/NODE/START_NODE/...）
+    const int N = (int)d.nodes.size();
+    auto centers = AutoGridPlace(N, GetClientSize()); // 简单自动排布
+    std::unordered_map<std::string, int> name2idx;
+
+    for (int i = 0; i < N; ++i) {
+        const auto& n = d.nodes[i];
+        ComponentType t = GuessTypeFromNodeName(this, n.name);
+        // 终端（I/O）优先映射到 START_NODE/END_NODE/NODE：这里如果名字不含提示，就保留 NODE
+        if (n.terminal) t = NODE_BASIC; // 也可以换成 START_NODE/END_NODE，看你的语义。:contentReference[oaicite:4]{index=4}
+
+        auto up = MakeComponent(t, centers[i]); // 直接创建你的组件实例。:contentReference[oaicite:5]{index=5}
+        if (!up) continue;
+        up->UpdateGeometry();
+        name2idx[n.name] = (int)components.size();
+        components.push_back(std::move(up));
+    }
+
+    // 3) 按 .nets 画线
+    // 规则：找 O（输出）做源；若没有 O，取第一个 pin 作源；其余视作汇，分别连一条曼哈顿折线
+    for (const auto& net : d.nets) {
+        if (net.pins.size() < 2) continue;
+
+        auto getAbs = [&](const std::string& cell, double dx, double dy)->wxPoint {
+            auto it = name2idx.find(cell);
+            if (it == name2idx.end()) return wxPoint(0, 0);
+            int idx = it->second;
+            wxPoint c = components[idx]->GetCenter();
+            return wxPoint((int)std::lround(c.x + dx), (int)std::lround(c.y + dy));
+            };
+
+        // 找驱动端
+        int src = -1;
+        for (int i = 0; i < (int)net.pins.size(); ++i) {
+            const auto& p = net.pins[i];
+            // 以 pinName 中的 'O' 作为驱动判断（常见写法）；否则留到后面兜底。:contentReference[oaicite:6]{index=6}
+            if (!p.pinName.empty() && (p.pinName[0] == 'O' || p.pinName[0] == 'o')) { src = i; break; }
+        }
+        if (src < 0) src = 0;
+
+        wxPoint s = getAbs(net.pins[src].cellName, net.pins[src].dx, net.pins[src].dy);
+        for (int i = 0; i < (int)net.pins.size(); ++i) {
+            if (i == src) continue;
+            wxPoint t = getAbs(net.pins[i].cellName, net.pins[i].dx, net.pins[i].dy);
+            auto poly = MakeManhattan(s, t);          // 你的 L 型走线工具。:contentReference[oaicite:7]{index=7}
+            if (poly.size() >= 2 && !(poly.front() == poly.back())) {
+                AddWire({ poly });                    // 用画布的“添加线”API。:contentReference[oaicite:8]{index=8}
+            }
+        }
+    }
+
+    Refresh(false);
+    return true;
 }
