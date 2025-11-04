@@ -44,16 +44,13 @@ cMain::cMain()
     fileMenu->Append(ID_Menu_ExportBookShelf,
         "Export as &BookShelf...\tCtrl+E",
         "Export current design to BookShelf (.nodes/.nets)");
+    fileMenu->Append(ID_Menu_ImportBookShelf,
+        "Import &BookShelf...\tCtrl+I",
+        "Import from BookShelf (.nodes + .nets)");
 
     fileMenu->AppendSeparator();
     fileMenu->Append(wxID_EXIT, "E&xit\tAlt+F4");
     menuBar->Append(fileMenu, "&File");
-
-    fileMenu->Append(ID_Menu_ImportBookShelf,
-        "Import &BookShelf...\tCtrl+I",
-        "Import from BookShelf (.nodes + .nets)");
-    Bind(wxEVT_MENU, &cMain::OnImportBookShelf, this, ID_Menu_ImportBookShelf);
-
 
     editMenu = new wxMenu();
     editMenu->Append(2001, "Clear &Texts");
@@ -92,6 +89,7 @@ cMain::cMain()
 
     // ★ 新增：绑定导出菜单
     Bind(wxEVT_MENU, &cMain::OnExportBookShelf, this, ID_Menu_ExportBookShelf);
+    Bind(wxEVT_MENU, &cMain::OnImportBookShelf, this, ID_Menu_ImportBookShelf);
 
     // ===================== 主体区域：左(树+属性) | 右(画布) =====================
     // 外层左右分割：左侧容器 + 右侧画布

@@ -674,18 +674,26 @@ void Decoder24::UpdateGeometry() {
 }
 
 std::vector<wxPoint> Decoder24::GetPins() const {
-    const int halfW = int(40.0 * scale);
-    // 左侧输入
-    wxPoint EN(m_center.x - halfW, m_center.y + int(25 * scale));
-    wxPoint A0(m_center.x - halfW, m_center.y - int(10 * scale));
-    wxPoint A1(m_center.x - halfW, m_center.y + int(10 * scale));
-    // 右侧输出
-    wxPoint Y0(m_center.x + halfW, m_center.y - int(30 * scale));
-    wxPoint Y1(m_center.x + halfW, m_center.y - int(10 * scale));
-    wxPoint Y2(m_center.x + halfW, m_center.y + int(10 * scale));
-    wxPoint Y3(m_center.x + halfW, m_center.y + int(30 * scale));
+    const double halfW = 40.0 * scale;
+    const double inLen = 15.0 * scale;
+
+    // 左侧输入末端：在方框左边再往外 inLen
+    const int inX_end = int(std::lround(m_center.x - halfW - inLen));
+    wxPoint EN(inX_end, int(std::lround(m_center.y + 25 * scale)));
+    wxPoint A0(inX_end, int(std::lround(m_center.y - 10 * scale)));
+    wxPoint A1(inX_end, int(std::lround(m_center.y + 10 * scale)));
+
+    // 右侧输出末端：在方框右边再往外 inLen
+    const int outX_end = int(std::lround(m_center.x + halfW + inLen));
+    wxPoint Y0(outX_end, int(std::lround(m_center.y - 30 * scale)));
+    wxPoint Y1(outX_end, int(std::lround(m_center.y - 10 * scale)));
+    wxPoint Y2(outX_end, int(std::lround(m_center.y + 10 * scale)));
+    wxPoint Y3(outX_end, int(std::lround(m_center.y + 30 * scale)));
+
+    // 返回顺序随意；保持“输入在前、输出在后”的习惯
     return { EN, A0, A1, Y0, Y1, Y2, Y3 };
 }
+
 
 // ------ 3-8 译码器 ------
 void Decoder38::drawSelf(wxMemoryDC& memDC) {
@@ -756,17 +764,24 @@ void Decoder38::UpdateGeometry() {
 }
 
 std::vector<wxPoint> Decoder38::GetPins() const {
-    const int halfW = int(48.0 * scale);
-    // 左侧输入
-    wxPoint A0(m_center.x - halfW, m_center.y - int(20 * scale));
-    wxPoint A1(m_center.x - halfW, m_center.y);
-    wxPoint A2(m_center.x - halfW, m_center.y + int(20 * scale));
-    wxPoint EN(m_center.x - halfW, m_center.y + int(60 * scale));
-    // 右侧输出
+    const double halfW = 48.0 * scale;
+    const double inLen = 15.0 * scale;
+
+    // 左侧输入末端
+    const int inX_end = int(std::lround(m_center.x - halfW - inLen));
+    wxPoint A0(inX_end, int(std::lround(m_center.y - 20 * scale)));
+    wxPoint A1(inX_end, int(std::lround(m_center.y + 0 * scale)));
+    wxPoint A2(inX_end, int(std::lround(m_center.y + 20 * scale)));
+    wxPoint EN(inX_end, int(std::lround(m_center.y + 60 * scale)));
+
+    // 右侧输出末端
+    const int outX_end = int(std::lround(m_center.x + halfW + inLen));
     const int ys[8] = { -70, -50, -30, -10, 10, 30, 50, 70 };
+
     std::vector<wxPoint> pins = { EN, A0, A1, A2 };
+    pins.reserve(4 + 8);
     for (int i = 0; i < 8; ++i) {
-        pins.emplace_back(m_center.x + halfW, m_center.y + int(ys[i] * scale));
+        pins.emplace_back(outX_end, int(std::lround(m_center.y + ys[i] * scale)));
     }
     return pins;
 }
