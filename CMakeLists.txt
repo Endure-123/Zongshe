@@ -25,3 +25,5 @@ add_executable(Zongshe WIN32 MACOSX_BUNDLE ${SOURCES})
 target_include_directories(Zongshe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/json)
 
 target_link_libraries(Zongshe PRIVATE ${wxWidgets_LIBRARIES})
+
+target_compile_definitions(Zongshe PRIVATE _CRT_SECURE_NO_WARNINGS)

@@ -6,6 +6,7 @@
 #include <memory>
 
 #include <wx/propgrid/propgrid.h>
+#include <wx/propgrid/property.h>
 #include <wx/sizer.h>
 #include <wx/valnum.h>
 
@@ -42,7 +43,7 @@ void PropertyPane::RefreshProperties() {
 
     m_propertyGrid->Append(new wxPropertyCategory(component->id));
     auto *typeProperty = new wxStringProperty("Type", wxPG_LABEL, component->type);
-    typeProperty->ChangeFlag(wxPG_PROP_READONLY, true);
+    typeProperty->ChangeFlag(wxPGPropertyFlags::ReadOnly, true);
     m_propertyGrid->Append(typeProperty);
 
     auto *xProperty = new wxFloatProperty("Position X", wxPG_LABEL, component->position.x);
