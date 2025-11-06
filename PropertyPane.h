@@ -1,26 +1,28 @@
-﻿#pragma once
-#include <wx/wx.h>
-#include <wx/aui/aui.h>
-#include <wx/propgrid/propgrid.h>
-#include <wx/propgrid/advprops.h>
-#include <wx/propgrid/manager.h>
+#pragma once
 
-class DrawBoard;
+#include "BoardModel.h"
+#include "CommandManager.h"
+
+#include <map>
+#include <wx/panel.h>
+#include <wx/propgrid/manager.h>
 
 class PropertyPane : public wxPanel {
 public:
-    PropertyPane(wxWindow* parent, DrawBoard* board);
-
-    // 由外部在“选择变化”时调用，重建属性页
-    void RebuildBySelection();
+    PropertyPane(wxWindow *parent, BoardModel &board, CommandManager &commands);
+    ~PropertyPane() override;
 
 private:
-    void BuildEmptyPage();
-    void BuildGatePage(long id);
-    void BuildWirePage(long id);
-    void OnPropChanged(wxPropertyGridEvent& e);
+    void RefreshProperties();
+    void OnBoardChanged();
+    void OnPropertyChanged(wxPropertyGridEvent &event);
 
-    wxAuiManager m_mgr;
-    wxPropertyGridManager* m_pg = nullptr;
-    DrawBoard* m_board = nullptr;
+    BoardModel &m_board;
+    CommandManager &m_commands;
+    BoardModel::ListenerToken m_listenerToken{0};
+    wxPropertyGridManager *m_propertyGrid{nullptr};
+    std::map<wxPGProperty *, std::string> m_propertyKeys;
+    bool m_updating{false};
+
+    wxDECLARE_EVENT_TABLE();
 };
