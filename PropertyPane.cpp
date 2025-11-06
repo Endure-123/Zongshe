@@ -43,7 +43,7 @@ void PropertyPane::RefreshProperties() {
 
     m_propertyGrid->Append(new wxPropertyCategory(component->id));
     auto *typeProperty = new wxStringProperty("Type", wxPG_LABEL, component->type);
-    typeProperty->ChangeFlag(wxPGPropertyFlags::ReadOnly, true);
+    typeProperty->Enable(false);
     m_propertyGrid->Append(typeProperty);
 
     auto *xProperty = new wxFloatProperty("Position X", wxPG_LABEL, component->position.x);
