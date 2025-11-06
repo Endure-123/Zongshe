@@ -19,29 +19,27 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="AppConfig.h" />
-    <ClInclude Include="BookShelfExporter.h" />
-    <ClInclude Include="BookShelfImporter.h" />
-    <ClInclude Include="cApp.h" />
-    <ClInclude Include="cMain.h" />
-    <ClInclude Include="Component.h" />
+    <ClInclude Include="App.h" />
+    <ClInclude Include="BoardModel.h" />
+    <ClInclude Include="BoardSerializer.h" />
+    <ClInclude Include="CommandManager.h" />
+    <ClInclude Include="Commands.h" />
     <ClInclude Include="DrawBoard.h" />
-    <ClInclude Include="EditCommands.h" />
     <ClInclude Include="json\json-forwards.h" />
     <ClInclude Include="json\json.h" />
+    <ClInclude Include="MainFrame.h" />
     <ClInclude Include="PropertyPane.h" />
     <ClInclude Include="ResourceManager.h" />
-    <ClInclude Include="SelectionEvents.h" />
-    <ClInclude Include="UndoRedo.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="BookShelfExporter.cpp" />
-    <ClCompile Include="BookShelfImporter.cpp" />
-    <ClCompile Include="cApp.cpp" />
-    <ClCompile Include="cMain.cpp" />
-    <ClCompile Include="Component.cpp" />
+    <ClCompile Include="App.cpp" />
+    <ClCompile Include="BoardModel.cpp" />
+    <ClCompile Include="BoardSerializer.cpp" />
+    <ClCompile Include="CommandManager.cpp" />
+    <ClCompile Include="Commands.cpp" />
     <ClCompile Include="DrawBoard.cpp" />
     <ClCompile Include="json\jsoncpp.cpp" />
+    <ClCompile Include="MainFrame.cpp" />
     <ClCompile Include="PropertyPane.cpp" />
     <ClCompile Include="ResourceManager.cpp" />
   </ItemGroup>
