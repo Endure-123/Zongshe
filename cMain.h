@@ -15,7 +15,10 @@ enum {
     ID_TOOL_ZOOMIN,
     ID_TOOL_ZOOMOUT,
     ID_Menu_ExportBookShelf,
-    ID_Menu_ImportBookShelf
+    ID_Menu_ImportBookShelf,
+    ID_Menu_SimStart = wxID_HIGHEST + 2001,
+    ID_Menu_SimStop,
+    ID_Menu_SimStep
 };
 
 // 前向声明：属性面板，避免头文件循环依赖

@@ -13,7 +13,7 @@ public:
 
     // 由外部在“选择变化”时调用，重建属性页
     void RebuildBySelection();
-
+    DrawBoard* m_board = nullptr;
 private:
     void BuildEmptyPage();
     void BuildGatePage(long id);
@@ -22,5 +22,5 @@ private:
 
     wxAuiManager m_mgr;
     wxPropertyGridManager* m_pg = nullptr;
-    DrawBoard* m_board = nullptr;
+    
 };

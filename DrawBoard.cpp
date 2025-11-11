@@ -9,13 +9,16 @@
 #include <map>
 #include <set>
 #include "BookShelfImporter.h"
+#include "Simulator.h"
+#include "Component.h"
 using bookshelf::BSDesign;
 using bookshelf::ParseBookShelf;
-
 using bookshelf::Node;
 using bookshelf::Net;
 using bookshelf::Pin;
 using bookshelf::ExportOptions;
+
+
 
 namespace {
     // 轴对齐包围盒宽高（由 m_BoundaryPoints[4] 推得）
@@ -66,9 +69,25 @@ DrawBoard::DrawBoard(wxWindow* parent) : wxPanel(parent)
 
     st1 = new wxStaticText(this, -1, wxT(""), wxPoint(10, 10));
     st2 = new wxStaticText(this, -1, wxT(""), wxPoint(10, 30));
+
+    // 创建仿真器与定时器
+    m_sim = new Simulator(this);
+    m_simTimer = new wxTimer(this);
+    Bind(wxEVT_TIMER, &DrawBoard::OnTimer, this);
 }
 
-DrawBoard::~DrawBoard() {}
+DrawBoard::~DrawBoard()
+{
+    if (m_simTimer && m_simTimer->IsRunning()) {
+        m_simTimer->Stop();
+    }
+    Unbind(wxEVT_TIMER, &DrawBoard::OnTimer, this);
+    delete m_simTimer;
+    m_simTimer = nullptr;
+
+    delete m_sim;
+    m_sim = nullptr;
+}
 
 void DrawBoard::OnPaint(wxPaintEvent& event)
 {
@@ -88,11 +107,21 @@ void DrawBoard::OnPaint(wxPaintEvent& event)
         drawGrid(gc);
 
         // ====== A) 已保存的线（折线绘制）======
-        gc->SetPen(wxPen(wxColour(0, 0, 0), 2));
-        for (const auto& poly : wires) {
+        for (int wi = 0; wi < (int)wires.size(); ++wi) {
+            const auto& poly = wires[wi];
+
+            // 仿真着色：高电平红色，低电平蓝灰；未仿真则默认黑
+            if (m_simulating && m_sim) {
+                bool high = m_sim->IsWireHigh(wi);
+                wxColour cc = high ? wxColour(255, 0, 0) : wxColour(100, 120, 200);
+                gc->SetPen(wxPen(cc, 2));
+            }
+            else {
+                gc->SetPen(wxPen(wxColour(0, 0, 0), 2));
+            }
+
             for (size_t i = 1; i < poly.size(); ++i) {
-                gc->StrokeLine(poly[i - 1].x, poly[i - 1].y,
-                    poly[i].x, poly[i].y);
+                gc->StrokeLine(poly[i - 1].x, poly[i - 1].y, poly[i].x, poly[i].y);
             }
         }
 
@@ -153,6 +182,9 @@ void DrawBoard::OnPaint(wxPaintEvent& event)
             components[i]->drawSelf(memDC);
         }
 
+        // 绘制节点状态（输入/输出0-1）
+        DrawNodeStates(gc);
+
         // 十字线
         gc->SetPen(wxPen(wxColour(0, 0, 0), 1));
         gc->StrokeLine(mousePos.x, 0, mousePos.x, GetSize().y);
@@ -209,6 +241,12 @@ void DrawBoard::OnButtonMove(wxMouseEvent& event)
 void DrawBoard::OnLeftDown(wxMouseEvent& event)
 {
     wxPoint pos = event.GetPosition();
+
+    // 点击起始节点切换电平（优先处理）
+    if (m_sim) {
+        ToggleStartNodeAt(pos);
+    }
+
 
     // 插入模式：由外部设置 pSelectedGateName 决定要插哪个门
     if (pSelectedGateName && !pSelectedGateName->IsEmpty()) {
@@ -1215,3 +1253,62 @@ bool DrawBoard::ImportBookShelf(const std::filesystem::path& nodesPath,
     Refresh(false);
     return true;
 }
+
+void DrawBoard::SimStart() {
+    if (!m_sim) return;
+    m_sim->BuildNetlist();   // 根据当前图构网
+    m_simulating = true;
+    m_sim->Run();
+    // 20ms 一步（50Hz），可按需调整
+    m_simTimer->Start(20);
+    Refresh(false);
+}
+
+void DrawBoard::SimStop() {
+    if (!m_sim) return;
+    m_sim->Stop();
+    m_simulating = false;
+    m_simTimer->Stop();
+    Refresh(false);
+}
+
+void DrawBoard::SimStep() {
+    if (!m_sim) return;
+    // 单步不启动定时器
+    m_sim->BuildNetlist();
+    m_sim->Step();
+}
+
+void DrawBoard::OnTimer(wxTimerEvent& e) {
+    if (m_sim && m_simulating) {
+        // 每 tick 单步推进
+        m_sim->Step();
+    }
+}
+
+bool DrawBoard::IsWireHighForPaint(int wireIndex) const {
+    return (m_sim && m_simulating) ? m_sim->IsWireHigh(wireIndex) : false;
+}
+
+// ========== 点击起始节点切换电平 ==========
+void DrawBoard::ToggleStartNodeAt(const wxPoint& pos)
+{
+    if (!m_sim) return;
+    int hit = HitTestGate(pos);
+    if (hit < 0 || hit >= (int)components.size()) return;
+
+    auto* c = components[hit].get();
+    if (c->m_type != ComponentType::NODE_START) return;
+
+    bool oldVal = m_sim->GetStartNodeValue(hit);
+    m_sim->SetStartNodeValue(hit, !oldVal);
+    Refresh(false);
+}
+
+void DrawBoard::DrawNodeStates(wxGraphicsContext* gc)
+{
+    // 不再绘制任何节点状态（完全交给连线颜色反映）
+    wxUnusedVar(gc);
+}
+
+

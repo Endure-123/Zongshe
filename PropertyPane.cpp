@@ -2,6 +2,7 @@
 #include "PropertyPane.h"
 #include "DrawBoard.h"
 #include <algorithm>
+#include "Simulator.h" 
 
 PropertyPane::PropertyPane(wxWindow* parent, DrawBoard* board)
     : wxPanel(parent, wxID_ANY), m_board(board)
@@ -52,9 +53,11 @@ void PropertyPane::BuildGatePage(long id) {
     m_pg->AddPage("Gate");
 
     if (id < 0 || id >= (long)m_board->components.size()) {
-        BuildEmptyPage(); return;
+        BuildEmptyPage();
+        return;
     }
     auto* c = m_board->components[(size_t)id].get();
+    if (!c) return;
 
     m_pg->Append(new wxPropertyCategory("General"));
     auto* pid = m_pg->Append(new wxIntProperty("Index", "idx", (int)id));
@@ -68,9 +71,34 @@ void PropertyPane::BuildGatePage(long id) {
     wxPoint center = c->GetCenter();
     m_pg->Append(new wxIntProperty("Position X", "pos_x", center.x));
     m_pg->Append(new wxIntProperty("Position Y", "pos_y", center.y));
-    // 若要可编辑 scale，可按需添加
-    // m_pg->Append(new wxFloatProperty("Scale", "scale", c->scale));
+
+    // ========== 新增：节点电平状态 ==========
+    if (c->m_type == ComponentType::NODE_START || c->m_type == ComponentType::NODE_END) {
+        bool val = false;
+
+        // 起始节点：直接从仿真器取值
+        if (c->m_type == ComponentType::NODE_START) {
+            val = m_board->m_sim->GetStartNodeValue(id);
+        }
+        // 终止节点：查看连接网络的电平
+        else if (c->m_type == ComponentType::NODE_END) {
+            for (const auto& net : m_board->m_sim->m_nets) {
+                for (const auto& ld : net.loads) {
+                    if (ld.compIdx == id) {
+                        val = net.value;
+                        break;
+                    }
+                }
+            }
+        }
+
+        m_pg->Append(new wxPropertyCategory("Signal"));
+        auto* plevel = m_pg->Append(new wxStringProperty("当前电平", "logic_level",
+            val ? "1 (高电平)" : "0 (低电平)"));
+        plevel->ChangeFlag(wxPGFlags(wxPG_PROP_READONLY), true);
+    }
 }
+
 
 void PropertyPane::BuildWirePage(long id) {
     m_pg->Clear();

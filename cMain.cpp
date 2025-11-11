@@ -36,8 +36,13 @@ cMain::cMain()
     // 菜单栏
     menuBar = new wxMenuBar();
     fileMenu = new wxMenu();
+    auto* simMenu = new wxMenu();
     fileMenu->Append(ID_SaveJSON, "Save JSON\tCtrl+S");
     fileMenu->Append(ID_LoadJSON, "Load JSON\tCtrl+O");
+    simMenu->Append(ID_Menu_SimStart, "Start Simulation\tF5");
+    simMenu->Append(ID_Menu_SimStop, "Stop Simulation\tShift+F5");
+    simMenu->Append(ID_Menu_SimStep, "Step\tF10");
+    menuBar->Append(simMenu, "&Simulation");
 
     // ★ 新增：Export as BookShelf… 菜单项（快捷键 Ctrl+E）
     fileMenu->AppendSeparator();
@@ -90,6 +95,11 @@ cMain::cMain()
     // ★ 新增：绑定导出菜单
     Bind(wxEVT_MENU, &cMain::OnExportBookShelf, this, ID_Menu_ExportBookShelf);
     Bind(wxEVT_MENU, &cMain::OnImportBookShelf, this, ID_Menu_ImportBookShelf);
+
+    // 绑定
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { if (drawBoard) drawBoard->SimStart(); }, ID_Menu_SimStart);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { if (drawBoard) drawBoard->SimStop();  }, ID_Menu_SimStop);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { if (drawBoard) drawBoard->SimStep();  }, ID_Menu_SimStep);
 
     // ===================== 主体区域：左(树+属性) | 右(画布) =====================
     // 外层左右分割：左侧容器 + 右侧画布

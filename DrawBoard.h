@@ -28,6 +28,8 @@ struct WireSnapshot {
     std::vector<wxPoint> poly;
 };
 
+class Simulator; // 前向声明
+
 class DrawBoard : public wxPanel
 {
 public:
@@ -133,6 +135,19 @@ public:
     void ZoomOutCenter();                                       // 以视窗中心缩小
     void ZoomBy(double factor, const wxPoint& anchorDevicePt);  // 以给定屏幕点为锚
 
+    // 仿真控制
+    void SimStart();
+    void SimStop();
+    void SimStep();
+    bool IsSimulating() const { return m_simulating; }
+    void ToggleStartNodeAt(const wxPoint& pos);  // 点击切换起始节点电平
+    void DrawNodeStates(wxGraphicsContext* gc);  // 绘制节点状态
+
+    // 供渲染时查询某条 wire 是否高电平
+    bool IsWireHighForPaint(int wireIndex) const;
+
+    Simulator* m_sim = nullptr;
+
 private:
     void OnPaint(wxPaintEvent& event);
     void OnButtonMove(wxMouseEvent& event);
@@ -189,4 +204,10 @@ private:
 
     // ★ 命令管理器
     CommandManager* m_cmd = nullptr;
+
+    
+    bool m_simulating = false;
+    wxTimer* m_simTimer = nullptr;
+
+    void OnTimer(wxTimerEvent& e);
 };

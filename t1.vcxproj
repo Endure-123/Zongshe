@@ -32,6 +32,7 @@
     <ClInclude Include="PropertyPane.h" />
     <ClInclude Include="ResourceManager.h" />
     <ClInclude Include="SelectionEvents.h" />
+    <ClInclude Include="Simulator.h" />
     <ClInclude Include="UndoRedo.h" />
   </ItemGroup>
   <ItemGroup>
@@ -44,6 +45,7 @@
     <ClCompile Include="json\jsoncpp.cpp" />
     <ClCompile Include="PropertyPane.cpp" />
     <ClCompile Include="ResourceManager.cpp" />
+    <ClCompile Include="Simulator.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
