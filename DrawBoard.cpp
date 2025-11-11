@@ -502,7 +502,7 @@ void DrawBoard::SaveToJson(const std::string& filename)
     // 3) 文本
     for (auto& txt : texts) {
         Json::Value obj;
-        obj["content"] = std::string(txt.second.mb_str());
+        obj["content"] = std::string(txt.second.ToUTF8());
         obj["x"] = txt.first.x;
         obj["y"] = txt.first.y;
         root["texts"].append(obj);
