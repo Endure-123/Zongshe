@@ -89,6 +89,30 @@ DrawBoard::~DrawBoard()
     m_sim = nullptr;
 }
 
+// 局部工具：寻找最近引脚（可排除某个组件下标，防止自吸附）
+static bool __FindNearestGatePinExcluding(const DrawBoard* self, const wxPoint& pos, wxPoint& snappedPos, int tolerance, int excludeCompIdx)
+{
+    int bestD2 = tolerance * tolerance + 1;
+    bool found = false;
+
+    for (int i = 0; i < (int)self->components.size(); ++i) {
+        if (i == excludeCompIdx) continue;
+        const auto& comp = self->components[i];
+        auto pins = comp->GetPins();
+        for (const auto& p : pins) {
+            int dx = p.x - pos.x;
+            int dy = p.y - pos.y;
+            int d2 = dx * dx + dy * dy;
+            if (d2 <= tolerance * tolerance && d2 < bestD2) {
+                bestD2 = d2;
+                snappedPos = p;
+                found = true;
+            }
+        }
+    }
+    return found;
+}
+
 void DrawBoard::OnPaint(wxPaintEvent& event)
 {
     wxAutoBufferedPaintDC dc(this);
@@ -217,6 +241,18 @@ void DrawBoard::OnButtonMove(wxMouseEvent& event)
         const wxPoint delta = mousePos - m_dragStartMouse;
         wxPoint target = m_dragStartCenter + delta;
         wxPoint snapped = SnapToStep(target);
+
+        // 起始/终止节点：优先吸附到“其他”元件的引脚，避免吸到自身
+        if (m_draggingIndex >= 0 && m_draggingIndex < (int)components.size()) {
+            auto* moved = components[m_draggingIndex].get();
+            if (moved->m_type == ComponentType::NODE_START || moved->m_type == ComponentType::NODE_END) {
+                wxPoint pinSnap;
+                if (__FindNearestGatePinExcluding(this, target, pinSnap, 15, m_draggingIndex)) {
+                    snapped = pinSnap;
+                }
+            }
+        }
+
         if (snapped != components[m_draggingIndex]->GetCenter()) {
             components[m_draggingIndex]->SetCenter(snapped);
             RerouteWiresForMovedComponent(m_draggingIndex, preMovePins);
@@ -229,7 +265,7 @@ void DrawBoard::OnButtonMove(wxMouseEvent& event)
     // 拖动文本（不吸附）
     if (m_isDraggingText && m_dragTextIndex >= 0 && m_dragTextIndex < (int)texts.size()) {
         const wxPoint delta = mousePos - m_dragTextStartMouse;
-        wxPoint target = m_dragTextStartPos + delta; // 不使用 SnapToStep / SnapToGrid
+        wxPoint target = m_dragTextStartPos + delta;
         texts[m_dragTextIndex].first = target;
         Refresh(false);
         return;
@@ -357,10 +393,22 @@ void DrawBoard::OnLeftUp(wxMouseEvent& event)
         if (idx >= 0 && idx < (int)components.size()) {
             wxPoint from = m_dragStartCenter;
             wxPoint to = components[idx]->GetCenter();
+
+            // 起始/终止节点落点再吸附一次（排除自身）
+            auto* moved = components[idx].get();
+            if (moved->m_type == ComponentType::NODE_START || moved->m_type == ComponentType::NODE_END) {
+                wxPoint pinSnap;
+                if (__FindNearestGatePinExcluding(this, to, pinSnap, 15, idx)) {
+                    moved->SetCenter(pinSnap);
+                    to = pinSnap;
+                }
+            }
+
             if (from != to && m_cmd) {
                 m_cmd->Execute(std::make_unique<MoveGateCmd>(this, idx, from, to));
             }
         }
+
         preMovePins.clear();
         Refresh(false);
     }
@@ -448,7 +496,18 @@ void DrawBoard::ClearPics() { lines.clear(); Refresh(false); }
 
 void DrawBoard::AddGate(const wxPoint& center, const wxString& typeName)
 {
-    GateSnapshot snap{ NameToType(typeName), SnapToStep(center), 1.0 };
+    wxPoint finalCenter = SnapToStep(center);
+
+    // ======= 新增：起始/终止节点吸附 =======
+    wxPoint pinSnap;
+    if (typeName.Contains("起始节点") || typeName.Contains("终止节点")) {
+        if (FindNearestGatePin(center, pinSnap, 15)) {
+            finalCenter = pinSnap;  // 吸附到最近引脚
+        }
+    }
+
+    GateSnapshot snap{ NameToType(typeName), finalCenter, 1.0 };
+
     if (m_cmd) {
         m_cmd->Execute(std::make_unique<AddGateCmd>(this, snap));
     }
@@ -457,6 +516,7 @@ void DrawBoard::AddGate(const wxPoint& center, const wxString& typeName)
     }
     Refresh(false);
 }
+
 
 void DrawBoard::SelectGate(const wxPoint& pos)
 {
@@ -1274,15 +1334,15 @@ void DrawBoard::SimStop() {
 
 void DrawBoard::SimStep() {
     if (!m_sim) return;
-    // 单步不启动定时器
     m_sim->BuildNetlist();
     m_sim->Step();
+    Refresh(false); // 单步也刷新
 }
 
 void DrawBoard::OnTimer(wxTimerEvent& e) {
     if (m_sim && m_simulating) {
-        // 每 tick 单步推进
         m_sim->Step();
+        Refresh(false); // 关键：推进后立刻刷新，连线与节点变色
     }
 }
 
@@ -1305,10 +1365,61 @@ void DrawBoard::ToggleStartNodeAt(const wxPoint& pos)
     Refresh(false);
 }
 
+// ========================
+//  节点电平着色（红=1, 蓝=0）
+// ========================
 void DrawBoard::DrawNodeStates(wxGraphicsContext* gc)
 {
-    // 不再绘制任何节点状态（完全交给连线颜色反映）
-    wxUnusedVar(gc);
+    if (!gc) return;
+    if (!m_sim) return;
+
+    const double r = 5.0; // 小圆点半径
+    for (int i = 0; i < (int)components.size(); ++i) {
+        auto* c = components[i].get();
+        if (!c) continue;
+        const auto pins = c->GetPins();
+        const bool isStart = (c->m_type == ComponentType::NODE_START);
+        const bool isEnd = (c->m_type == ComponentType::NODE_END);
+        if (!isStart && !isEnd) continue; // 只给起始/终止节点着色
+
+        bool level = false;
+        if (isStart) {
+            level = m_sim->GetStartNodeValue(i);
+        }
+        else {
+            // 终止节点：取其输入引脚所在线网的电平（多个输入取 OR 容忍）
+            bool v = false;
+            for (const auto& net : m_sim->m_nets) {
+                for (const auto& ld : net.loads) {
+                    if (ld.compIdx == i) { v = v || net.value; }
+                }
+            }
+            level = v;
+        }
+
+        // 选择一个可视位置（节点一般只有一个引脚）
+        wxPoint center = c->GetCenter();
+        if (!pins.empty()) center = pins[0];
+
+        wxColour col = level ? wxColour(255, 0, 0) : wxColour(80, 120, 220); // 红=1，蓝=0
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(wxBrush(col));
+        gc->DrawEllipse(center.x - r, center.y - r, 2 * r, 2 * r);
+    }
 }
 
+// ===== 查找最近引脚用于吸附 =====
+bool DrawBoard::FindNearestGatePin(const wxPoint& pos, wxPoint& snappedPos, int tolerance) const
+{
+    for (const auto& comp : components) {
+        auto pins = comp->GetPins();
+        for (const auto& p : pins) {
+            if (std::abs(p.x - pos.x) <= tolerance && std::abs(p.y - pos.y) <= tolerance) {
+                snappedPos = p;
+                return true;
+            }
+        }
+    }
+    return false;
+}
 

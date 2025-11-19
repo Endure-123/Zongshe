@@ -143,6 +143,9 @@ public:
     void ToggleStartNodeAt(const wxPoint& pos);  // 点击切换起始节点电平
     void DrawNodeStates(wxGraphicsContext* gc);  // 绘制节点状态
 
+    //节点吸附
+    bool FindNearestGatePin(const wxPoint& pos, wxPoint& snappedPos, int tolerance = 10) const;
+
     // 供渲染时查询某条 wire 是否高电平
     bool IsWireHighForPaint(int wireIndex) const;
 

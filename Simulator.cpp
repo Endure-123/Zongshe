@@ -22,17 +22,27 @@ void Simulator::BuildNetlist() {
     // 展开所有组件引脚
     for (int i = 0; i < (int)m_board->components.size(); ++i) {
         auto* c = m_board->components[i].get();
-        auto pins = c->GetPins(); // 最后一个为输出
+        auto pins = c->GetPins();
         for (int p = 0; p < (int)pins.size(); ++p) {
             FlatPin fp;
             fp.pt = pins[p];
             fp.ref = PinRef{ i, p };
-            fp.isOutput = (p == (int)pins.size() - 1);
+            // 关键：只有普通逻辑门和起始节点把“最后一个引脚”视作输出；
+            // 终止节点/普通结点一律作为输入端，避免它们被挑成驱动端导致颜色判断错误
+            if (c->m_type == ComponentType::NODE_END || c->m_type == ComponentType::NODE_BASIC) {
+                fp.isOutput = false;
+            }
+            else if (c->m_type == ComponentType::NODE_START) {
+                fp.isOutput = true; // 起始节点视作驱动源
+            }
+            else {
+                fp.isOutput = (p == (int)pins.size() - 1);
+            }
             flat.push_back(fp);
         }
     }
 
-    // 每条 wire → 生成 SimNet
+    // 每条 wire → 生成 SimNet（两端点分别绑定到最近引脚）
     for (int w = 0; w < (int)m_board->wires.size(); ++w) {
         const auto& poly = m_board->wires[w];
         if (poly.size() < 2) continue;
@@ -44,7 +54,6 @@ void Simulator::BuildNetlist() {
 
         auto bindEnd = [&](const wxPoint& endpoint) {
             for (const auto& fp : flat) {
-                // 容差放宽为 10 像素
                 if (NearlyEqualPt(fp.pt, endpoint, 10)) {
                     if (fp.isOutput) {
                         if (!net.driver.has_value())
