@@ -60,6 +60,9 @@
     <ClInclude Include="Simulator.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="ToolIDs.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ResourceManager.cpp">
@@ -92,5 +95,13 @@
     <ClCompile Include="Simulator.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\..\Downloads\icon.ico">
+      <Filter>资源文件</Filter>
+    </Image>
+    <Image Include="..\..\Downloads\ChatGPT Image 2025年11月19日 12_39_35.ico">
+      <Filter>资源文件</Filter>
+    </Image>
   </ItemGroup>
 </Project>

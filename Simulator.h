@@ -11,7 +11,7 @@ class Component;
 // ========== 引脚引用结构 ==========
 struct PinRef {
     int compIdx = -1;  // 组件下标
-    int pinIdx = -1;  // 引脚下标（0..n-1；最后一个视为输出）
+    int pinIdx = -1;  // 引脚下标（0..n-1）
     bool operator==(const PinRef& o) const { return compIdx == o.compIdx && pinIdx == o.pinIdx; }
 };
 
@@ -29,7 +29,7 @@ public:
     explicit Simulator(DrawBoard* board);
 
     void BuildNetlist();   // 从 DrawBoard 生成仿真网络
-    void Step();           // 单步仿真
+    void Step();           // 单步仿真（使其稳定）
     void Run();            // 启动连续仿真
     void Stop();           // 停止仿真
     bool IsRunning() const { return m_running; }
@@ -45,7 +45,10 @@ private:
     DrawBoard* m_board = nullptr;
     bool m_running = false;
 
+    // ★ 新增: wire 索引到 net 索引的映射
+    std::unordered_map<int, int> m_wire_to_net_map;
+
     void ComputeAllGateOutputs(std::vector<bool>& gateOut);
-    void PropagateToInputs(const std::vector<bool>& gateOut);
+    // (PropagateToInputs 将被合并到 Step 中)
     void UpdateNetValues();
 };

@@ -33,6 +33,7 @@
     <ClInclude Include="ResourceManager.h" />
     <ClInclude Include="SelectionEvents.h" />
     <ClInclude Include="Simulator.h" />
+    <ClInclude Include="ToolIDs.h" />
     <ClInclude Include="UndoRedo.h" />
   </ItemGroup>
   <ItemGroup>
@@ -46,6 +47,10 @@
     <ClCompile Include="PropertyPane.cpp" />
     <ClCompile Include="ResourceManager.cpp" />
     <ClCompile Include="Simulator.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\..\Downloads\ChatGPT Image 2025年11月19日 12_39_35.ico" />
+    <Image Include="..\..\Downloads\icon.ico" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>

@@ -25,7 +25,7 @@ EVT_MENU(2001, cMain::OnClearTexts)
 EVT_MENU(2002, cMain::OnClearPics)
 wxEND_EVENT_TABLE()
 
-wxBitmap cMain::LoadToolBitmap(const wxString& filename, int size)
+wxBitmap cMain::LoadToolBitmap(const wxString & filename, int size)
 {
     return ResourceManager::LoadBitmap(IMG_DIR, filename, size);
 }

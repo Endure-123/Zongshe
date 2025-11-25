@@ -1316,9 +1316,13 @@ bool DrawBoard::ImportBookShelf(const std::filesystem::path& nodesPath,
 
 void DrawBoard::SimStart() {
     if (!m_sim) return;
-    m_sim->BuildNetlist();   // 根据当前图构网
-    m_simulating = true;
+    m_sim->BuildNetlist();   // ★ 在开始时构网一次
     m_sim->Run();
+    m_simulating = true;
+
+    // ★ 第一次运行时，先 Settle 一次，计算初始状态
+    m_sim->Step();
+
     // 20ms 一步（50Hz），可按需调整
     m_simTimer->Start(20);
     Refresh(false);
@@ -1334,19 +1338,25 @@ void DrawBoard::SimStop() {
 
 void DrawBoard::SimStep() {
     if (!m_sim) return;
-    m_sim->BuildNetlist();
-    m_sim->Step();
+
+    // ★ 单步时也需要构网 (如果还没构网或已停止)
+    // (如果 m_simulating 为 true, 假设网表仍然有效)
+    if (!m_simulating) {
+        m_sim->BuildNetlist();
+    }
+    m_sim->Step(); // 执行一次 Settle
     Refresh(false); // 单步也刷新
 }
 
 void DrawBoard::OnTimer(wxTimerEvent& e) {
     if (m_sim && m_simulating) {
-        m_sim->Step();
+        m_sim->Step(); // ★ 定时器现在调用 Settle
         Refresh(false); // 关键：推进后立刻刷新，连线与节点变色
     }
 }
 
 bool DrawBoard::IsWireHighForPaint(int wireIndex) const {
+    // ★ 此函数现在依赖于修正后的 m_sim->IsWireHigh()
     return (m_sim && m_simulating) ? m_sim->IsWireHigh(wireIndex) : false;
 }
 
@@ -1354,6 +1364,9 @@ bool DrawBoard::IsWireHighForPaint(int wireIndex) const {
 void DrawBoard::ToggleStartNodeAt(const wxPoint& pos)
 {
     if (!m_sim) return;
+    // ★ 必须在仿真运行时才允许切换
+    if (!m_simulating) return;
+
     int hit = HitTestGate(pos);
     if (hit < 0 || hit >= (int)components.size()) return;
 
@@ -1362,6 +1375,9 @@ void DrawBoard::ToggleStartNodeAt(const wxPoint& pos)
 
     bool oldVal = m_sim->GetStartNodeValue(hit);
     m_sim->SetStartNodeValue(hit, !oldVal);
+
+    // ★ 切换后立即 Settle 一次，而不是等待定时器
+    m_sim->Step();
     Refresh(false);
 }
 
@@ -1372,6 +1388,8 @@ void DrawBoard::DrawNodeStates(wxGraphicsContext* gc)
 {
     if (!gc) return;
     if (!m_sim) return;
+    // ★ 只在仿真时绘制
+    if (!m_simulating) return;
 
     const double r = 5.0; // 小圆点半径
     for (int i = 0; i < (int)components.size(); ++i) {
@@ -1387,11 +1405,14 @@ void DrawBoard::DrawNodeStates(wxGraphicsContext* gc)
             level = m_sim->GetStartNodeValue(i);
         }
         else {
-            // 终止节点：取其输入引脚所在线网的电平（多个输入取 OR 容忍）
+            // 终止节点：取其输入引脚所在线网的电平
+            // ★ 修正后的 BuildNetlist 保证了多线汇聚到此节点也能正确
             bool v = false;
             for (const auto& net : m_sim->m_nets) {
                 for (const auto& ld : net.loads) {
-                    if (ld.compIdx == i) { v = v || net.value; }
+                    if (ld.compIdx == i) {
+                        v = v || net.value; // 多个输入到终止节点, 取 OR
+                    }
                 }
             }
             level = v;
@@ -1399,11 +1420,18 @@ void DrawBoard::DrawNodeStates(wxGraphicsContext* gc)
 
         // 选择一个可视位置（节点一般只有一个引脚）
         wxPoint center = c->GetCenter();
-        if (!pins.empty()) center = pins[0];
+        if (isEnd && !pins.empty()) {
+            center = pins[0]; // 终止节点用引脚位置
+        }
+        if (isStart && !pins.empty()) {
+            center = pins[0]; // 起始节点用引脚位置
+        }
+
 
         wxColour col = level ? wxColour(255, 0, 0) : wxColour(80, 120, 220); // 红=1，蓝=0
         gc->SetPen(*wxTRANSPARENT_PEN);
         gc->SetBrush(wxBrush(col));
+        // ★ 在引脚处绘制小圆点
         gc->DrawEllipse(center.x - r, center.y - r, 2 * r, 2 * r);
     }
 }
