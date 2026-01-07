@@ -18,7 +18,10 @@ using bookshelf::Net;
 using bookshelf::Pin;
 using bookshelf::ExportOptions;
 
-
+static inline bool IsAttachableNode(ComponentType t) {
+    return (t == ComponentType::NODE_START ||
+        t == ComponentType::NODE_END);
+}
 
 namespace {
     // 轴对齐包围盒宽高（由 m_BoundaryPoints[4] 推得）
@@ -396,7 +399,7 @@ void DrawBoard::OnLeftUp(wxMouseEvent& event)
 
             // 起始/终止节点落点再吸附一次（排除自身）
             auto* moved = components[idx].get();
-            if (moved->m_type == ComponentType::NODE_START || moved->m_type == ComponentType::NODE_END) {
+            if (IsAttachableNode(moved->m_type)) {
                 wxPoint pinSnap;
                 if (__FindNearestGatePinExcluding(this, to, pinSnap, 15, idx)) {
                     moved->SetCenter(pinSnap);
@@ -492,31 +495,71 @@ void DrawBoard::DeleteSelectedText()
 
 // ============ 对外接口 ============
 void DrawBoard::ClearTexts() { texts.clear(); Refresh(false); }
-void DrawBoard::ClearPics() { lines.clear(); Refresh(false); }
+// 清空连线（兼容旧直线 lines + 新折线 wires）
+void DrawBoard::ClearPics() {
+    wires.clear();
+    lines.clear();
+    selectedWireIndex = -1;
+    Refresh(false);
+    NotifySelectionChanged();
+}
+
+// 一键清空：清空画板上所有内容（元件/连线/文本），并重置选择状态
+void DrawBoard::ClearAll() {
+    // 若正在仿真，先停掉，避免定时器/仿真器访问已清空的数据
+    if (m_simulating) {
+        SimStop();
+    }
+
+    // 清空所有绘制元素
+    wires.clear();
+    lines.clear();
+    texts.clear();
+    components.clear();
+
+    // 清空仿真状态
+    if (m_sim) {
+        m_sim->m_nets.clear();
+        m_sim->m_startNodeValue.clear();
+    }
+
+    // 重置选择/拖拽状态
+    selectedGateIndex = -1;
+    selectedWireIndex = -1;
+    selectedTextIndex = -1;
+    m_draggingIndex = -1;
+    m_isDragging = false;
+    m_isDraggingText = false;
+    m_dragTextIndex = -1;
+    m_selKind = SelKind::None;
+    m_selId = -1;
+    preMovePins.clear();
+
+    // 清空“准备插入的元件类型”（避免一键清空后误触继续插入）
+    if (pSelectedGateName) pSelectedGateName->Clear();
+
+    Refresh(false);
+    NotifySelectionChanged();
+}
 
 void DrawBoard::AddGate(const wxPoint& center, const wxString& typeName)
 {
+    ComponentType t = NameToType(typeName);
     wxPoint finalCenter = SnapToStep(center);
 
-    // ======= 新增：起始/终止节点吸附 =======
-    wxPoint pinSnap;
-    if (typeName.Contains("起始节点") || typeName.Contains("终止节点")) {
+    if (IsAttachableNode(t)) {
+        wxPoint pinSnap;
         if (FindNearestGatePin(center, pinSnap, 15)) {
-            finalCenter = pinSnap;  // 吸附到最近引脚
+            finalCenter = pinSnap;
         }
     }
 
-    GateSnapshot snap{ NameToType(typeName), finalCenter, 1.0 };
+    GateSnapshot snap{ t, finalCenter, 1.0 };
+    if (m_cmd) m_cmd->Execute(std::make_unique<AddGateCmd>(this, snap));
+    else       AddGateFromSnapshot(snap);
 
-    if (m_cmd) {
-        m_cmd->Execute(std::make_unique<AddGateCmd>(this, snap));
-    }
-    else {
-        AddGateFromSnapshot(snap);
-    }
     Refresh(false);
 }
-
 
 void DrawBoard::SelectGate(const wxPoint& pos)
 {

@@ -2,86 +2,145 @@
 #include "Simulator.h"
 #include "DrawBoard.h"
 #include "Component.h"
-#include <cmath>
+
 #include <algorithm>
-#include <numeric> // For std::iota
+#include <cmath>
 #include <map>
+#include <numeric>
+#include <unordered_map>
+
+// ==========================================================
+//  仿真关键点：
+//  1) BuildNetlist 必须正确处理：
+//     - 线端点连接
+//     - T 形连接（线的端点落在另一条线的中间）
+//     - pin/节点点落在导线中间（无需手工把线拆段）
+//  2) Step 必须迭代直到网络电平稳定（组合逻辑多级传播）
+//  3) 译码器属于多输出元件，需要按 pinIdx 输出不同值
+// ==========================================================
+
 
 // ========= 工具：误差判断 =========
-static inline bool NearlyEqualPt(const wxPoint& a, const wxPoint& b, int tol = 10) {
+static inline bool NearlyEqualPt(const wxPoint& a, const wxPoint& b, int tol = 4) {
     return (std::abs(a.x - b.x) <= tol) && (std::abs(a.y - b.y) <= tol);
 }
 
-// ========= 辅助结构：并查集 =========
-struct UF {
-    std::vector<int> parent;
-    UF(int n) : parent(n) { std::iota(parent.begin(), parent.end(), 0); } // 初始化，每个元素的父节点是自己
-    int find(int i) {
-        if (parent[i] == i) return i;
-        return parent[i] = find(parent[i]); // 路径压缩
-    }
-    void unite(int i, int j) {
-        int root_i = find(i);
-        int root_j = find(j);
-        if (root_i != root_j) parent[root_i] = root_j; // 合并
-    }
-};
-
-// ========= 辅助结构：引脚定义 =========
-struct FlatPin {
-    wxPoint pt;     // 坐标
-    PinRef ref;     // 引用 (compIdx, pinIdx)
-    bool isOutput;  // 是否为输出引脚
-};
-
-// ========= 辅助函数：查找坐标点上的所有引脚 =========
-static std::vector<int> FindPinsAt(const wxPoint& pt, const std::vector<FlatPin>& flat, int tol) {
-    std::vector<int> indices;
-    for (int i = 0; i < (int)flat.size(); ++i) {
-        if (NearlyEqualPt(pt, flat[i].pt, tol)) {
-            indices.push_back(i);
-        }
-    }
-    return indices;
+static inline long long PinKey(int compIdx, int pinIdx) {
+    return (static_cast<long long>(compIdx) << 32) ^ static_cast<unsigned int>(pinIdx);
 }
 
+static inline int DivFloorInt(int v, int d) {
+    if (d <= 0) return 0;
+    if (v >= 0) return v / d;
+    return -(((-v) + d - 1) / d);
+}
+
+static inline bool PointOnSegmentTol(const wxPoint& p, const wxPoint& a, const wxPoint& b, int tol) {
+    // 轴对齐线段（Manhattan） + 少量容差
+    if (a.x == b.x) {
+        const int x = a.x;
+        const int y0 = std::min(a.y, b.y);
+        const int y1 = std::max(a.y, b.y);
+        return (std::abs(p.x - x) <= tol) && (p.y >= y0 - tol) && (p.y <= y1 + tol);
+    }
+    if (a.y == b.y) {
+        const int y = a.y;
+        const int x0 = std::min(a.x, b.x);
+        const int x1 = std::max(a.x, b.x);
+        return (std::abs(p.y - y) <= tol) && (p.x >= x0 - tol) && (p.x <= x1 + tol);
+    }
+
+    // 兜底：一般不会出现（你的布线工具是 Manhattan）
+    const double ax = a.x, ay = a.y;
+    const double bx = b.x, by = b.y;
+    const double px = p.x, py = p.y;
+    const double vx = bx - ax;
+    const double vy = by - ay;
+    const double wx_ = px - ax;
+    const double wy_ = py - ay;
+    const double vv = vx * vx + vy * vy;
+    if (vv <= 1e-9) return NearlyEqualPt(p, a, tol);
+
+    double t = (wx_ * vx + wy_ * vy) / vv;
+    if (t < 0.0) t = 0.0;
+    if (t > 1.0) t = 1.0;
+    const double cx = ax + t * vx;
+    const double cy = ay + t * vy;
+    const double dx = px - cx;
+    const double dy = py - cy;
+    return (dx * dx + dy * dy) <= double(tol * tol);
+}
+
+// ========= 并查集 =========
+struct UF {
+    std::vector<int> parent;
+    explicit UF(int n) : parent(n) { std::iota(parent.begin(), parent.end(), 0); }
+    int find(int i) {
+        if (parent[i] == i) return i;
+        return parent[i] = find(parent[i]);
+    }
+    void unite(int i, int j) {
+        const int ri = find(i);
+        const int rj = find(j);
+        if (ri != rj) parent[ri] = rj;
+    }
+};
+
+// ========= 扁平引脚 =========
+struct FlatPin {
+    wxPoint pt;
+    PinRef ref;
+    bool isOutput = false;
+};
 
 Simulator::Simulator(DrawBoard* board) : m_board(board) {}
 
+
 // ==========================================================
-// ★ 重构: BuildNetlist (使用并查集)
+// BuildNetlist：从几何连通性构造仿真网络
 // ==========================================================
 void Simulator::BuildNetlist() {
     m_nets.clear();
     m_wire_to_net_map.clear();
     if (!m_board) return;
 
-    std::vector<FlatPin> flat; // 存储所有组件的所有引脚
+    // 连接容差：不要太大（避免误连），但要能覆盖缩放/取整造成的 1~2 像素误差
+    // 若你有“缩放很多次后偶尔断连”，可把 4 调到 5；一般别再往上。
+    constexpr int CONNECT_TOL = 4;
+    constexpr int CELL = CONNECT_TOL + 1;
 
-    // 1. 展开所有组件引脚, 并确定 I/O 属性
+    // 1) 收集全部组件引脚
+    std::vector<FlatPin> flat;
+    flat.reserve(256);
+
+    std::vector<wxPoint> nodePts;     // pin 点 + wire 顶点点
+    nodePts.reserve(512);
+    std::vector<int> flatNodeIdx;     // flat[i] -> nodePts idx
+    flatNodeIdx.reserve(256);
+
     for (int i = 0; i < (int)m_board->components.size(); ++i) {
         auto* c = m_board->components[i].get();
-        auto pins = c->GetPins();
+        if (!c) continue;
+        const auto pins = c->GetPins();
         for (int p = 0; p < (int)pins.size(); ++p) {
             FlatPin fp;
             fp.pt = pins[p];
             fp.ref = PinRef{ i, p };
-            fp.isOutput = false; // 默认是输入
+            fp.isOutput = false;
 
-            // 根据组件类型判断引脚是否为输出
             switch (c->m_type) {
             case ComponentType::NODE_START:
-                fp.isOutput = true; // 起始节点是驱动源
+                fp.isOutput = true;
                 break;
             case ComponentType::NODE_END:
             case ComponentType::NODE_BASIC:
-                fp.isOutput = false; // 终止/普通节点 始终是负载
+                fp.isOutput = false;
                 break;
-            case ComponentType::DECODER24: // 7 pins: EN, A0, A1, Y0, Y1, Y2, Y3
-                fp.isOutput = (p >= 3); // Y0-Y3 是输出
+            case ComponentType::DECODER24:
+                fp.isOutput = (p >= 3); // EN,A0,A1,Y0..Y3
                 break;
-            case ComponentType::DECODER38: // 12 pins: EN, A0, A1, A2, Y0...Y7
-                fp.isOutput = (p >= 4); // Y0-Y7 是输出
+            case ComponentType::DECODER38:
+                fp.isOutput = (p >= 4); // EN,A0,A1,A2,Y0..Y7
                 break;
             case ComponentType::NOTGATE:
             case ComponentType::ANDGATE:
@@ -90,139 +149,173 @@ void Simulator::BuildNetlist() {
             case ComponentType::NORGATE:
             case ComponentType::XORGATE:
             case ComponentType::XNORGATE:
-                fp.isOutput = (p == (int)pins.size() - 1); // 默认最后一个是输出
+                fp.isOutput = (p == (int)pins.size() - 1);
                 break;
             default:
                 fp.isOutput = false;
                 break;
             }
+
+            flatNodeIdx.push_back((int)nodePts.size());
+            nodePts.push_back(fp.pt);
             flat.push_back(fp);
         }
     }
-
     if (flat.empty()) return;
 
-    // 2. 使用并查集 (UF) 合并连接的引脚
-    UF uf(flat.size());
+    // 2) 收集所有 wire 的折线点
+    std::vector<int> wireAnyNode(m_board->wires.size(), -1);
+    for (int w = 0; w < (int)m_board->wires.size(); ++w) {
+        const auto& poly = m_board->wires[w];
+        if (poly.size() < 2) continue;
+        wireAnyNode[w] = (int)nodePts.size();
+        for (const auto& pt : poly) nodePts.push_back(pt);
+    }
+    if (nodePts.empty()) return;
 
-    // 2a. 通过 wires 合并
+    UF uf((int)nodePts.size());
+
+    // 3) 合并“几乎重合”的点（用于抗缩放取整误差）
+    {
+        auto CellKey = [](int cx, int cy) -> long long {
+            return (static_cast<long long>(cx) << 32) ^ static_cast<unsigned int>(cy);
+            };
+        std::unordered_map<long long, std::vector<int>> buckets;
+        buckets.reserve(nodePts.size() * 2);
+
+        for (int idx = 0; idx < (int)nodePts.size(); ++idx) {
+            const auto& p = nodePts[idx];
+            const int cx = DivFloorInt(p.x, CELL);
+            const int cy = DivFloorInt(p.y, CELL);
+
+            // 查邻域桶，避免漏掉边界情况
+            for (int dx = -1; dx <= 1; ++dx) {
+                for (int dy = -1; dy <= 1; ++dy) {
+                    const long long k = CellKey(cx + dx, cy + dy);
+                    auto it = buckets.find(k);
+                    if (it == buckets.end()) continue;
+                    for (int j : it->second) {
+                        if (NearlyEqualPt(p, nodePts[j], CONNECT_TOL)) uf.unite(idx, j);
+                    }
+                }
+            }
+            buckets[CellKey(cx, cy)].push_back(idx);
+        }
+    }
+
+    // 4) 通过每一段导线把段上的点合并
+    //    支持：线端点落在另一条线的中间、pin 落在线中间、无需拆线
     for (int w = 0; w < (int)m_board->wires.size(); ++w) {
         const auto& poly = m_board->wires[w];
         if (poly.size() < 2) continue;
 
-        // 查找导线两端连接的所有引脚
-        auto pinsA = FindPinsAt(poly.front(), flat, 10);
-        auto pinsB = FindPinsAt(poly.back(), flat, 10);
+        for (size_t k = 1; k < poly.size(); ++k) {
+            const wxPoint a = poly[k - 1];
+            const wxPoint b = poly[k];
+            if (a == b) continue;
 
-        // 2b. (重要) 合并所有在 *同一* 端点上的引脚 (例如 NODE_BASIC)
-        for (size_t i = 1; i < pinsA.size(); ++i) uf.unite(pinsA[0], pinsA[i]);
-        for (size_t i = 1; i < pinsB.size(); ++i) uf.unite(pinsB[0], pinsB[i]);
+            const int minx = std::min(a.x, b.x) - CONNECT_TOL;
+            const int maxx = std::max(a.x, b.x) + CONNECT_TOL;
+            const int miny = std::min(a.y, b.y) - CONNECT_TOL;
+            const int maxy = std::max(a.y, b.y) + CONNECT_TOL;
 
-        // 2c. 连接 A 端和 B 端
-        if (!pinsA.empty() && !pinsB.empty()) {
-            uf.unite(pinsA[0], pinsB[0]);
+            std::vector<int> onSeg;
+            onSeg.reserve(8);
+            for (int idx = 0; idx < (int)nodePts.size(); ++idx) {
+                const auto& p = nodePts[idx];
+                if (p.x < minx || p.x > maxx || p.y < miny || p.y > maxy) continue;
+                if (PointOnSegmentTol(p, a, b, CONNECT_TOL)) onSeg.push_back(idx);
+            }
+            for (size_t t = 1; t < onSeg.size(); ++t) uf.unite(onSeg[0], onSeg[t]);
         }
     }
 
-    // 3. 根据 UF 的 root 建立 SimNets
+    // 5) 根据 UF root 建立 SimNet（只从“组件引脚”生成 driver/loads）
     std::map<int, SimNet> root_to_net;
     for (int i = 0; i < (int)flat.size(); ++i) {
-        int root = uf.find(i);
+        const int root = uf.find(flatNodeIdx[i]);
         SimNet& net = root_to_net[root];
 
         const FlatPin& fp = flat[i];
         if (fp.isOutput) {
-            if (!net.driver.has_value()) { // 只取第一个驱动
+            if (!net.driver.has_value()) {
                 net.driver = fp.ref;
             }
-            // else: 多个驱动源连接在一起 (短路), 忽略后续的
         }
         else {
-            // 避免重复添加负载 (UF 可能导致同一引脚被多次访问)
-            bool found = false;
-            for (const auto& ld : net.loads) if (ld == fp.ref) found = true;
-            if (!found) net.loads.push_back(fp.ref);
+            net.loads.push_back(fp.ref);
         }
     }
 
-    // 4. 将 wire 索引关联到 SimNets
+    // 6) wire -> net 关联（按 wire 任意顶点的 root 归属）
     for (int w = 0; w < (int)m_board->wires.size(); ++w) {
-        const auto& poly = m_board->wires[w];
-        if (poly.size() < 2) continue;
+        const int any = (w >= 0 && w < (int)wireAnyNode.size()) ? wireAnyNode[w] : -1;
+        if (any < 0) continue;
 
-        // 找到线缆端点连接的第一个 pin
-        auto pinsA = FindPinsAt(poly.front(), flat, 10);
-        if (!pinsA.empty()) {
-            int root = uf.find(pinsA[0]);
-            root_to_net[root].wireIndices.push_back(w);
-        }
-        else {
-            auto pinsB = FindPinsAt(poly.back(), flat, 10);
-            if (!pinsB.empty()) {
-                int root = uf.find(pinsB[0]);
-                root_to_net[root].wireIndices.push_back(w);
-            }
+        const int root = uf.find(any);
+        auto it = root_to_net.find(root);
+        if (it != root_to_net.end()) {
+            it->second.wireIndices.push_back(w);
         }
     }
 
-    // 5. 转移到 m_nets, 并建立 wire -> net 映射
+    // 7) 转移到 m_nets，并建立 wire -> net 映射
     m_nets.reserve(root_to_net.size());
     int net_idx = 0;
     for (auto& pair : root_to_net) {
         auto& indices = pair.second.wireIndices;
-        // 去重
         std::sort(indices.begin(), indices.end());
         indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
 
-        // 建立映射
-        for (int wire_idx : indices) {
-            m_wire_to_net_map[wire_idx] = net_idx;
-        }
-
+        for (int wire_idx : indices) m_wire_to_net_map[wire_idx] = net_idx;
         m_nets.push_back(std::move(pair.second));
-        net_idx++;
+        ++net_idx;
     }
 }
 
 
 // ==========================================================
-// ★ 修正: ComputeAllGateOutputs
+// ComputeAllGateOutputs：基于当前 net.value 计算每个元件输出
 // ==========================================================
-void Simulator::ComputeAllGateOutputs(std::vector<bool>& gateOut) {
+void Simulator::ComputeAllGateOutputs(std::vector<bool>& gateOut,
+    std::unordered_map<long long, bool>& multiOut) {
+
+    if (!m_board) return;
+
     gateOut.assign(m_board->components.size(), false);
+    multiOut.clear();
 
     for (int i = 0; i < (int)m_board->components.size(); ++i) {
         auto* c = m_board->components[i].get();
-        auto pins = c->GetPins();
+        if (!c) continue;
+        const auto pins = c->GetPins();
 
         // 确定输入引脚数量
         int inCount = 0;
         switch (c->m_type) {
         case ComponentType::NODE_START:  inCount = 0; break;
-        case ComponentType::NODE_END:    inCount = 1; break; // 假定1个输入
-        case ComponentType::NODE_BASIC:  inCount = (int)pins.size(); break; // 全是输入
-        case ComponentType::DECODER24:   inCount = 3; break; // EN, A0, A1
-        case ComponentType::DECODER38:   inCount = 4; break; // EN, A0, A1, A2
+        case ComponentType::NODE_END:    inCount = 1; break;
+        case ComponentType::NODE_BASIC:  inCount = (int)pins.size(); break;
+        case ComponentType::DECODER24:   inCount = 3; break; // EN,A0,A1
+        case ComponentType::DECODER38:   inCount = 4; break; // EN,A0,A1,A2
         case ComponentType::NOTGATE:     inCount = 1; break;
-        default: // AND, OR, NAND, NOR, XOR, XNOR
+        default:
             inCount = std::max(0, (int)pins.size() - 1);
             break;
         }
 
-        // 从 net 中收集输入信号
+        // 收集输入信号
         std::vector<bool> ins(inCount, false);
         for (const auto& net : m_nets) {
-            bool netVal = net.value;
+            const bool netVal = net.value;
             for (const auto& ld : net.loads) {
-                // 如果这个负载是当前组件 i, 并且引脚索引是输入引脚
                 if (ld.compIdx == i && ld.pinIdx >= 0 && ld.pinIdx < inCount) {
                     ins[ld.pinIdx] = netVal;
                 }
             }
         }
 
-        // 根据输入计算输出 (gateOut[i] 存储组件 i 的 *主* 输出)
-        // (注意：多输出组件(译码器)的逻辑未在此处实现)
+        // 计算输出
         switch (c->m_type) {
         case ComponentType::NODE_START: {
             auto it = m_startNodeValue.find(i);
@@ -230,7 +323,6 @@ void Simulator::ComputeAllGateOutputs(std::vector<bool>& gateOut) {
             break;
         }
         case ComponentType::NODE_END: {
-            // ★ 修正: 终止节点"输出"它唯一的输入值 (用于DrawNodeStates着色)
             gateOut[i] = (inCount >= 1) ? ins[0] : false;
             break;
         }
@@ -268,16 +360,39 @@ void Simulator::ComputeAllGateOutputs(std::vector<bool>& gateOut) {
             gateOut[i] = (inCount > 0) ? v : false;
             break;
         }
-                                   // ★ 新增
         case ComponentType::XNORGATE: {
             bool v = false;
             for (bool b : ins) v ^= b;
-            gateOut[i] = (inCount > 0) ? !v : true; // XNOR
+            gateOut[i] = (inCount > 0) ? !v : true;
             break;
         }
-                                    // ★ 译码器和普通节点没有单一输出
-        case ComponentType::DECODER24:
-        case ComponentType::DECODER38:
+        case ComponentType::DECODER24: {
+            // 7 pins: EN(0),A0(1),A1(2),Y0(3)..Y3(6)
+            const bool en = (inCount >= 1) ? ins[0] : false;
+            const int a0 = (inCount >= 2 && ins[1]) ? 1 : 0;
+            const int a1 = (inCount >= 3 && ins[2]) ? 1 : 0;
+            const int idx = (a1 << 1) | a0;
+            for (int outPin = 3; outPin <= 6; ++outPin) {
+                const bool v = en && ((outPin - 3) == idx);
+                multiOut[PinKey(i, outPin)] = v;
+            }
+            gateOut[i] = false;
+            break;
+        }
+        case ComponentType::DECODER38: {
+            // 12 pins: EN(0),A0(1),A1(2),A2(3),Y0(4)..Y7(11)
+            const bool en = (inCount >= 1) ? ins[0] : false;
+            const int a0 = (inCount >= 2 && ins[1]) ? 1 : 0;
+            const int a1 = (inCount >= 3 && ins[2]) ? 1 : 0;
+            const int a2 = (inCount >= 4 && ins[3]) ? 1 : 0;
+            const int idx = (a2 << 2) | (a1 << 1) | a0;
+            for (int outPin = 4; outPin <= 11; ++outPin) {
+                const bool v = en && ((outPin - 4) == idx);
+                multiOut[PinKey(i, outPin)] = v;
+            }
+            gateOut[i] = false;
+            break;
+        }
         case ComponentType::NODE_BASIC:
         default:
             gateOut[i] = false;
@@ -286,74 +401,69 @@ void Simulator::ComputeAllGateOutputs(std::vector<bool>& gateOut) {
     }
 }
 
-void Simulator::UpdateNetValues() {
-    // 当前逻辑简单，net.value 已更新
-}
 
 // ==========================================================
-// ★ 重构: Step (改为“Settle”稳定逻辑)
+// Step：迭代传播直到稳定（Settle）
 // ==========================================================
 void Simulator::Step() {
     if (!m_board) return;
 
-    // (BuildNetlist 已移到 SimStart 和 SimStep(DrawBoard) 中)
-
-    const int MAX_ITERATIONS = 50; // Settle 迭代上限, 防止振荡器死循环
+    const int MAX_ITERATIONS = 64;
     bool changed = true;
-    // 存储所有(单输出)门的值
+
     std::vector<bool> gateOut(m_board->components.size(), false);
+    std::unordered_map<long long, bool> multiOut;
+    multiOut.reserve(m_board->components.size() * 4);
 
     for (int iter = 0; iter < MAX_ITERATIONS && changed; ++iter) {
         changed = false;
 
-        // 1. 计算所有门输出 (基于 m_nets 当前值)
-        ComputeAllGateOutputs(gateOut);
+        // 1) 计算输出
+        ComputeAllGateOutputs(gateOut, multiOut);
 
-        // 2. 将 gateOut 传播回 m_nets
-        // (注意：这个传播逻辑对多输出组件(译码器)无效)
+        // 2) 写回网络
         for (auto& net : m_nets) {
             bool new_val = false;
+
             if (net.driver.has_value()) {
                 const auto& d = *net.driver;
-                // 检查是否为多输出组件
-                auto* c = m_board->components[d.compIdx].get();
-                if (c->m_type == ComponentType::DECODER24 || c->m_type == ComponentType::DECODER38) {
-                    // TODO: 此处需要译码器的完整仿真逻辑
-                    // 暂时保持 false
-                }
-                else {
-                    // 单输出组件
-                    if (d.compIdx >= 0 && d.compIdx < (int)gateOut.size()) {
-                        new_val = gateOut[d.compIdx];
+                if (d.compIdx >= 0 && d.compIdx < (int)m_board->components.size()) {
+                    auto* dc = m_board->components[d.compIdx].get();
+                    if (dc && (dc->m_type == ComponentType::DECODER24 || dc->m_type == ComponentType::DECODER38)) {
+                        auto it = multiOut.find(PinKey(d.compIdx, d.pinIdx));
+                        new_val = (it != multiOut.end()) ? it->second : false;
+                    }
+                    else {
+                        if (d.compIdx >= 0 && d.compIdx < (int)gateOut.size()) {
+                            new_val = gateOut[d.compIdx];
+                        }
                     }
                 }
             }
-            // else: no driver, new_val stays false
 
             if (net.value != new_val) {
                 net.value = new_val;
-                changed = true; // 状态改变，需要再迭代
+                changed = true;
             }
         }
     }
-    // 循环结束，电路已 "settle"
 }
-
 
 void Simulator::Run() { m_running = true; }
 void Simulator::Stop() { m_running = false; }
 
+
 // ==========================================================
-// ★ 修正: IsWireHigh (使用映射表)
+// IsWireHigh：wire 着色查询
 // ==========================================================
 bool Simulator::IsWireHigh(int wireIndex) const {
     auto it = m_wire_to_net_map.find(wireIndex);
-    if (it == m_wire_to_net_map.end()) return false; // 导线未连接到网络
+    if (it == m_wire_to_net_map.end()) return false;
 
-    int net_idx = it->second;
+    const int net_idx = it->second;
     if (net_idx < 0 || net_idx >= (int)m_nets.size()) return false;
 
-    return m_nets[net_idx].value; // 返回所属网络的电平
+    return m_nets[net_idx].value;
 }
 
 void Simulator::SetStartNodeValue(int compIdx, bool v) {

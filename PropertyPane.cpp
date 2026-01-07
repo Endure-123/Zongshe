@@ -2,7 +2,7 @@
 #include "PropertyPane.h"
 #include "DrawBoard.h"
 #include <algorithm>
-#include "Simulator.h" 
+#include "Simulator.h"
 
 PropertyPane::PropertyPane(wxWindow* parent, DrawBoard* board)
     : wxPanel(parent, wxID_ANY), m_board(board)
@@ -21,11 +21,17 @@ PropertyPane::PropertyPane(wxWindow* parent, DrawBoard* board)
 }
 
 void PropertyPane::RebuildBySelection() {
+    // ★ 优化：在重建前先取消绑定，防止重建过程触发不必要的 OnPropChanged
+    Unbind(wxEVT_PG_CHANGED, &PropertyPane::OnPropChanged, this);
+
     switch (m_board->GetSelectionKind()) {
     case SelKind::Gate: BuildGatePage(m_board->GetSelectionId()); break;
     case SelKind::Wire: BuildWirePage(m_board->GetSelectionId()); break;
     default:            BuildEmptyPage(); break;
     }
+
+    // ★ 优化：重建后再绑定
+    Bind(wxEVT_PG_CHANGED, &PropertyPane::OnPropChanged, this);
 }
 
 void PropertyPane::BuildEmptyPage() {
@@ -43,7 +49,6 @@ void PropertyPane::BuildEmptyPage() {
         "- 单击连线以查看端点\n"
         "- 修改 Gate 的 Position X/Y 将即时作用于画布"
     );
-    // ← 用 SetFlag 代替 ChangeFlag
     hint->ChangeFlag(wxPGFlags(wxPG_PROP_READONLY), true);
     m_pg->Append(hint);
 }
@@ -72,30 +77,35 @@ void PropertyPane::BuildGatePage(long id) {
     m_pg->Append(new wxIntProperty("Position X", "pos_x", center.x));
     m_pg->Append(new wxIntProperty("Position Y", "pos_y", center.y));
 
-    // ========== 新增：节点电平状态 ==========
-    if (c->m_type == ComponentType::NODE_START || c->m_type == ComponentType::NODE_END) {
-        bool val = false;
+    // ========== ★ 优化：节点电平状态 ==========
+    if (m_board->IsSimulating() && (c->m_type == ComponentType::NODE_START || c->m_type == ComponentType::NODE_END))
+    {
+        m_pg->Append(new wxPropertyCategory("Signal"));
 
-        // 起始节点：直接从仿真器取值
+        // ★ 优化：起始节点 (START_NODE) 改为可写的布尔值 (复选框)
         if (c->m_type == ComponentType::NODE_START) {
-            val = m_board->m_sim->GetStartNodeValue(id);
+            bool val = m_board->m_sim->GetStartNodeValue(id);
+            // "start_val" 是 key，"Value" 是显示名称
+            auto* pVal = m_pg->Append(new wxBoolProperty("Value", "start_val", val));
+            // 设置为复选框样式
+            pVal->SetAttribute(wxPG_BOOL_USE_CHECKBOX, true);
         }
-        // 终止节点：查看连接网络的电平
+        // 终止节点 (END_NODE) 保持只读
         else if (c->m_type == ComponentType::NODE_END) {
+            bool val = false;
+            // 逻辑不变：查找连接到此节点的网络的电平
             for (const auto& net : m_board->m_sim->m_nets) {
                 for (const auto& ld : net.loads) {
                     if (ld.compIdx == id) {
                         val = net.value;
-                        break;
+                        break; // 找到一个即可
                     }
                 }
             }
+            auto* plevel = m_pg->Append(new wxStringProperty("Current Level", "logic_level",
+                val ? "1 (High)" : "0 (Low)"));
+            plevel->ChangeFlag(wxPGFlags(wxPG_PROP_READONLY), true);
         }
-
-        m_pg->Append(new wxPropertyCategory("Signal"));
-        auto* plevel = m_pg->Append(new wxStringProperty("当前电平", "logic_level",
-            val ? "1 (高电平)" : "0 (低电平)"));
-        plevel->ChangeFlag(wxPGFlags(wxPG_PROP_READONLY), true);
     }
 }
 
@@ -131,6 +141,19 @@ void PropertyPane::BuildWirePage(long id) {
         pex->ChangeFlag(wxPGFlags(wxPG_PROP_READONLY), true);
         pey->ChangeFlag(wxPGFlags(wxPG_PROP_READONLY), true);
     }
+
+    // ========== ★ 优化：显示导线的逻辑电平 ==========
+    m_pg->Append(new wxPropertyCategory("Simulation"));
+    wxString levelStr = "N/A (Stopped)";
+
+    if (m_board->IsSimulating() && m_board->m_sim) {
+        // 使用 IsWireHigh (已在上一轮修复)
+        bool level = m_board->m_sim->IsWireHigh(id);
+        levelStr = level ? "1 (High)" : "0 (Low)";
+    }
+
+    auto* plevel = m_pg->Append(new wxStringProperty("Logic Level", "logic_level", levelStr));
+    plevel->ChangeFlag(wxPGFlags(wxPG_PROP_READONLY), true);
 }
 
 void PropertyPane::OnPropChanged(wxPropertyGridEvent& e) {
@@ -147,11 +170,33 @@ void PropertyPane::OnPropChanged(wxPropertyGridEvent& e) {
             wxPoint center = c->GetCenter();
             if (key == "pos_x") center.x = v.GetInteger();
             else                center.y = v.GetInteger();
+
+            // ★ TODO: 为支持 Undo/Redo，此处应使用 Command 模式
+            // 示例 (需要修改 cMain 和 DrawBoard 以传递 m_cmdMgr):
+            // wxPoint oldPos = c->GetCenter();
+            // if (m_cmd && oldPos != center) {
+            //    m_cmd->Execute(std::make_unique<MoveGateCmd>(m_board, idx, oldPos, center));
+            // } 
+
+            // 当前的直接修改 (无 Undo):
             c->SetCenter(center);
             c->UpdateGeometry();
             m_board->Refresh(false);
         }
-        // else if (key == "scale") { c->scale = v.GetDouble(); c->UpdateGeometry(); m_board->Refresh(false); }
+        // ========== ★ 优化：处理 START_NODE 值变化 ==========
+        else if (key == "start_val") {
+            if (c->m_type == ComponentType::NODE_START && m_board->IsSimulating() && m_board->m_sim) {
+                bool newVal = v.GetBool();
+
+                // ★ TODO: 此处也应使用 Command 模式
+                // 示例: m_cmd->Execute(std::make_unique<SetNodeValueCmd>(...));
+
+                // 当前的直接修改 (无 Undo):
+                m_board->m_sim->SetStartNodeValue(idx, newVal);
+                m_board->SimStep(); // 立即触发一次 Settle
+                m_board->Refresh(false);
+            }
+        }
         break;
     }
     case SelKind::Wire:

@@ -97,6 +97,7 @@ public:
     void DeleteSelection();                  // 优先删除元件，否则删除线
     void ClearTexts();
     void ClearPics();
+    void ClearAll();
 
 	// ===== 书架格式导入导出 =====
     bool ExportAsBookShelf(const std::string& projectName,

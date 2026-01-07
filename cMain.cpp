@@ -37,45 +37,40 @@ cMain::cMain()
     menuBar = new wxMenuBar();
     fileMenu = new wxMenu();
     auto* simMenu = new wxMenu();
-    fileMenu->Append(ID_SaveJSON, "Save JSON\tCtrl+S");
-    fileMenu->Append(ID_LoadJSON, "Load JSON\tCtrl+O");
-    simMenu->Append(ID_Menu_SimStart, "Start Simulation\tF5");
-    simMenu->Append(ID_Menu_SimStop, "Stop Simulation\tShift+F5");
-    simMenu->Append(ID_Menu_SimStep, "Step\tF10");
-    menuBar->Append(simMenu, "&Simulation");
-
-    // ★ 新增：Export as BookShelf… 菜单项（快捷键 Ctrl+E）
-    fileMenu->AppendSeparator();
-    fileMenu->Append(ID_Menu_ExportBookShelf,
-        "Export as &BookShelf...\tCtrl+E",
-        "Export current design to BookShelf (.nodes/.nets)");
-    fileMenu->Append(ID_Menu_ImportBookShelf,
-        "Import &BookShelf...\tCtrl+I",
-        "Import from BookShelf (.nodes + .nets)");
+    fileMenu->Append(ID_SaveJSON, "保存\tCtrl+S");
+    fileMenu->Append(ID_LoadJSON, "打开\tCtrl+O");
+    simMenu->Append(ID_Menu_SimStart, "开始仿真\tF5");
+    simMenu->Append(ID_Menu_SimStop, "停止仿真\tShift+F5");
+    simMenu->Append(ID_Menu_SimStep, "单步\tF10");
+    menuBar->Append(simMenu, "仿真");
 
     fileMenu->AppendSeparator();
-    fileMenu->Append(wxID_EXIT, "E&xit\tAlt+F4");
-    menuBar->Append(fileMenu, "&File");
+    fileMenu->Append(ID_Menu_ExportBookShelf, "导出为 BookShelf...\tCtrl+E", "导出当前设计为 BookShelf (.nodes/.nets)");
+    fileMenu->Append(ID_Menu_ImportBookShelf, "导入 BookShelf...\tCtrl+I", "从 BookShelf (.nodes + .nets) 导入");
+
+    fileMenu->AppendSeparator();
+    fileMenu->Append(wxID_EXIT, "退出\tAlt+F4");
+    menuBar->Append(fileMenu, "文件");
 
     editMenu = new wxMenu();
-    editMenu->Append(2001, "Clear &Texts");
-    editMenu->Append(2002, "Clear &Lines");
+    editMenu->Append(2001, "清空文本");
+    editMenu->Append(2002, "一键清空");
     editMenu->Prepend(wxID_REDO, "重做\tCtrl+Y");
     editMenu->Prepend(wxID_UNDO, "撤销\tCtrl+Z");
-    menuBar->Append(editMenu, "&Edit");
+    menuBar->Append(editMenu, "&编辑");
 
     SetMenuBar(menuBar);
 
     // 工具栏
     m_toolBar = CreateToolBar();
-    m_toolBar->AddRadioTool(ID_TOOL_ARROW, "Arrow", LoadToolBitmap("Arrow"));
-    m_toolBar->AddRadioTool(ID_TOOL_TEXT, "Text", LoadToolBitmap("BigA"));
-    m_toolBar->AddRadioTool(ID_TOOL_HAND, "Hand", LoadToolBitmap("hands"));
-    m_toolBar->AddTool(ID_TOOL_DELETE, "Delete", LoadToolBitmap("delete"));
-    m_toolBar->AddTool(wxID_UNDO, "Undo", LoadToolBitmap("Undo"));
-    m_toolBar->AddTool(wxID_REDO, "Redo", LoadToolBitmap("Redo"));
-    m_toolBar->AddTool(ID_TOOL_ZOOMIN, "Zoom In", LoadToolBitmap("ZoomIn"));
-    m_toolBar->AddTool(ID_TOOL_ZOOMOUT, "Zoom Out", LoadToolBitmap("ZoomOut"));
+    m_toolBar->AddRadioTool(ID_TOOL_ARROW, "选择", LoadToolBitmap("Arrow"));
+    m_toolBar->AddRadioTool(ID_TOOL_TEXT, "文本", LoadToolBitmap("BigA"));
+    m_toolBar->AddRadioTool(ID_TOOL_HAND, "连线", LoadToolBitmap("hands"));
+    m_toolBar->AddTool(ID_TOOL_DELETE, "删除", LoadToolBitmap("delete"));
+    m_toolBar->AddTool(wxID_UNDO, "撤销", LoadToolBitmap("Undo"));
+    m_toolBar->AddTool(wxID_REDO, "重做", LoadToolBitmap("Redo"));
+    m_toolBar->AddTool(ID_TOOL_ZOOMIN, "放大", LoadToolBitmap("ZoomIn"));
+    m_toolBar->AddTool(ID_TOOL_ZOOMOUT, "缩小", LoadToolBitmap("ZoomOut"));
     m_toolBar->ToggleTool(ID_TOOL_ARROW, true);
     m_toolBar->Realize();
 
@@ -214,7 +209,13 @@ cMain::~cMain()
 
 void cMain::OnExit(wxCommandEvent& evt) { Close(true); }
 void cMain::OnClearTexts(wxCommandEvent& evt) { drawBoard->ClearTexts(); }
-void cMain::OnClearPics(wxCommandEvent& evt) { drawBoard->ClearPics(); }
+void cMain::OnClearPics(wxCommandEvent& evt) {
+    if (!drawBoard) return;
+    // 一键清空：清空画板全部内容，同时清空撤销/重做栈，避免残留命令引用旧索引
+    drawBoard->ClearAll();
+    m_cmdMgr.Clear();
+    SetStatusText("已清空画板");
+}
 
 void cMain::OnToolSelected(wxCommandEvent& evt)
 {

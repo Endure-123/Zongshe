@@ -11,7 +11,7 @@ class Component;
 // ========== 引脚引用结构 ==========
 struct PinRef {
     int compIdx = -1;  // 组件下标
-    int pinIdx = -1;  // 引脚下标（0..n-1）
+    int pinIdx = -1;   // 引脚下标（0..n-1）
     bool operator==(const PinRef& o) const { return compIdx == o.compIdx && pinIdx == o.pinIdx; }
 };
 
@@ -29,26 +29,27 @@ public:
     explicit Simulator(DrawBoard* board);
 
     void BuildNetlist();   // 从 DrawBoard 生成仿真网络
-    void Step();           // 单步仿真（使其稳定）
+    void Step();           // 单步仿真（迭代直到稳定）
     void Run();            // 启动连续仿真
     void Stop();           // 停止仿真
     bool IsRunning() const { return m_running; }
 
-    bool IsWireHigh(int wireIndex) const; // 查询线的高低电平
-    void SetStartNodeValue(int compIdx, bool v); // 设置起始节点输出值
-    bool GetStartNodeValue(int compIdx) const;   // 获取起始节点输出值
+    bool IsWireHigh(int wireIndex) const;             // 查询线的高低电平
+    void SetStartNodeValue(int compIdx, bool v);      // 设置起始节点输出值
+    bool GetStartNodeValue(int compIdx) const;        // 获取起始节点输出值
 
-    std::vector<SimNet> m_nets;                     // 仿真网络
-    std::unordered_map<int, bool> m_startNodeValue; // 起始节点电平表
+    std::vector<SimNet> m_nets;                       // 仿真网络
+    std::unordered_map<int, bool> m_startNodeValue;   // 起始节点电平表
 
 private:
     DrawBoard* m_board = nullptr;
     bool m_running = false;
 
-    // ★ 新增: wire 索引到 net 索引的映射
+    // wire 索引到 net 索引的映射（用于渲染着色）
     std::unordered_map<int, int> m_wire_to_net_map;
 
-    void ComputeAllGateOutputs(std::vector<bool>& gateOut);
-    // (PropagateToInputs 将被合并到 Step 中)
-    void UpdateNetValues();
+    // gateOut: 单输出元件的输出（按 compIdx 存）
+    // multiOut: 多输出元件（目前仅译码器）的输出（按 (compIdx,pinIdx) 存）
+    void ComputeAllGateOutputs(std::vector<bool>& gateOut,
+        std::unordered_map<long long, bool>& multiOut);
 };
